@@ -25,6 +25,7 @@ BLOCKED_MODULES = frozenset(
 
 BLOCKED_CALLS = frozenset({"compile", "eval", "exec", "globals", "locals", "open", "__import__"})
 ENTRY_PATH = PurePosixPath("Model/model.py")
+ALLOWED_ARTIFACTS = frozenset({"model.json", "model.step", "model.stl"})
 
 
 def validate_entry_path(value: str) -> PurePosixPath:
@@ -59,11 +60,33 @@ def validate_model_code(source: str) -> None:
                 raise CodePolicyError(f"Call is not allowed: {node.func.id}")
             if node.func.id == "GraphSession":
                 graph_session_used = True
+            if node.func.id == "Path":
+                if not node.args or not isinstance(node.args[0], ast.Name):
+                    raise CodePolicyError("Path may only resolve from __file__")
+                if node.args[0].id != "__file__":
+                    raise CodePolicyError("Path may only resolve from __file__")
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr == "write_text":
+                artifact = _joined_artifact_name(node.func.value)
+                if artifact not in ALLOWED_ARTIFACTS:
+                    raise CodePolicyError("Model code may only write fixed Model artifacts")
         if isinstance(node, ast.Name) and node.id == "GraphSession":
             graph_session_used = True
 
     if not graph_session_used:
         raise CodePolicyError("Model code must use GraphSession")
+
+
+def _joined_artifact_name(node: ast.expr) -> str | None:
+    if not isinstance(node, ast.BinOp) or not isinstance(node.op, ast.Div):
+        return None
+    if not isinstance(node.left, ast.Name) or node.left.id != "model_dir":
+        return None
+    return (
+        node.right.value
+        if isinstance(node.right, ast.Constant) and isinstance(node.right.value, str)
+        else None
+    )
 
 
 def resolve_workspace_model(workspace_root: Path, requested_workspace: str) -> Path:

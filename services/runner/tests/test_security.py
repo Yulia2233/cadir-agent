@@ -34,6 +34,20 @@ def test_allows_pathlib_for_fixed_model_artifact_paths() -> None:
     )
 
 
+def test_rejects_pathlib_escape_and_unapproved_artifacts() -> None:
+    with pytest.raises(CodePolicyError, match="Path may only resolve from __file__"):
+        validate_model_code(
+            "from pathlib import Path\nfrom simplecadapi import GraphSession\n"
+            "GraphSession()\nPath('/etc/passwd').read_text()"
+        )
+    with pytest.raises(CodePolicyError, match="fixed Model artifacts"):
+        validate_model_code(
+            "from pathlib import Path\nfrom simplecadapi import GraphSession\n"
+            "GraphSession()\nmodel_dir = Path(__file__).resolve().parent\n"
+            "(model_dir / 'secret.txt').write_text('x')"
+        )
+
+
 @pytest.mark.parametrize("call", ["open('x')", "exec('x=1')", "eval('1')"])
 def test_blocks_dynamic_or_file_calls(call: str) -> None:
     with pytest.raises(CodePolicyError, match="Call is not allowed"):
