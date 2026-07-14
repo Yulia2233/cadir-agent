@@ -91,15 +91,11 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Build Runner image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: services/runner/Dockerfile
-          platforms: linux/amd64
-          push: false
-          tags: cadir-runner:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+        run: docker build -f services/runner/Dockerfile -t cadir-runner:ci .
+      - name: Verify Runner container isolation
+        env:
+          RUNNER_IMAGE: cadir-runner:ci
+        run: node tests/deployment/verify-runner-container.mjs
       - name: Scan filesystem
         uses: aquasecurity/trivy-action@0.30.0
         with:
