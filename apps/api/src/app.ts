@@ -18,6 +18,8 @@ import { messageRoutes } from './routes/messages.js';
 import { modelConfigRoutes } from './routes/model-configs.js';
 import { uploadRoutes } from './routes/uploads.js';
 import { revisionRoutes } from './routes/revisions.js';
+import { modelCaseRoutes } from './routes/model-cases.js';
+import { caseCandidateRoutes } from './routes/case-candidates.js';
 
 export async function buildApp(config: AppConfig = loadConfig()): Promise<FastifyInstance> {
   const app = Fastify({
@@ -65,5 +67,7 @@ export async function buildApp(config: AppConfig = loadConfig()): Promise<Fastif
   await app.register(messageRoutes);
   await app.register(eventRoutes);
   await app.register(artifactRoutes);
+  await app.register(modelCaseRoutes);
+  await app.register(caseCandidateRoutes);
   return app;
 }
