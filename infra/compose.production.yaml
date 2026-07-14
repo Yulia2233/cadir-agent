@@ -2,6 +2,7 @@ services:
   api:
     environment:
       NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required in production}
     ports: !reset []
     deploy:
       resources:

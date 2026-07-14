@@ -8,6 +8,7 @@ import { authPlugin } from './plugins/auth.js';
 import { databasePlugin } from './plugins/database.js';
 import { errorHandlerPlugin } from './plugins/error-handler.js';
 import { objectStorePlugin } from './plugins/object-store.js';
+import { redisPlugin } from './plugins/redis.js';
 import { authRoutes } from './routes/auth.js';
 import { artifactRoutes } from './routes/artifacts.js';
 import { conversationRoutes } from './routes/conversations.js';
@@ -48,6 +49,7 @@ export async function buildApp(config: AppConfig = loadConfig()): Promise<Fastif
   await app.register(helmet, { contentSecurityPolicy: false });
   await app.register(rateLimit, { max: 300, timeWindow: '1 minute' });
   await app.register(databasePlugin);
+  await app.register(redisPlugin);
   await app.register(objectStorePlugin);
   await app.register(authPlugin);
   await app.register(errorHandlerPlugin);

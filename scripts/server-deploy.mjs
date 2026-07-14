@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { accessSync, constants } from 'node:fs';
+import { accessSync, constants, statSync } from 'node:fs';
 
 const action = process.argv[2] ?? 'check';
 const envFile = process.env.CADIR_ENV_FILE ?? '/etc/cadir/cadir.env';
@@ -22,13 +22,45 @@ function run(command, args, options = {}) {
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
+function output(command, args) {
+  const result = spawnSync(command, args, { encoding: 'utf8' });
+  if (result.error) throw result.error;
+  if (result.status !== 0) process.exit(result.status ?? 1);
+  return result.stdout.trim();
+}
+
+function parseVersion(value) {
+  const [major = 0, minor = 0] = value.match(/\d+/g)?.map(Number) ?? [];
+  return { major, minor };
+}
+
+function assertMinimumVersion(label, value, minimumMajor, minimumMinor = 0) {
+  const version = parseVersion(value);
+  if (
+    version.major < minimumMajor ||
+    (version.major === minimumMajor && version.minor < minimumMinor)
+  ) {
+    throw new Error(`${label} ${minimumMajor}.${minimumMinor}+ is required; found ${value}`);
+  }
+}
+
 function checkEnvironment() {
   if (process.platform !== 'linux') {
     throw new Error('Production deployment requires a Linux Docker host');
   }
   accessSync(envFile, constants.R_OK);
-  run('docker', ['version', '--format', '{{.Server.Version}}']);
-  run('docker', ['compose', 'version']);
+  const envMode = statSync(envFile).mode & 0o777;
+  if ((envMode & 0o077) !== 0) {
+    throw new Error(`${envFile} must not be readable or writable by group or other users`);
+  }
+  const serverPlatform = output('docker', ['info', '--format', '{{.OSType}}/{{.Architecture}}']);
+  if (serverPlatform !== 'linux/x86_64') {
+    throw new Error(`Production deployment requires linux/amd64; found ${serverPlatform}`);
+  }
+  const dockerVersion = output('docker', ['version', '--format', '{{.Server.Version}}']);
+  assertMinimumVersion('Docker Engine', dockerVersion, 27);
+  const composeVersion = output('docker', ['compose', 'version', '--short']);
+  assertMinimumVersion('Docker Compose', composeVersion, 2, 24);
   run('docker', [...composeArgs, 'config', '--quiet']);
 }
 

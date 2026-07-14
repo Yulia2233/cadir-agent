@@ -40,7 +40,7 @@ The API listens on `http://localhost:8080` and exposes liveness/readiness at `/h
 
 ## Server deployment
 
-The checked-in images use pinned Debian Linux bases, multi-stage builds, non-root numeric users, health checks, bounded logs, and no embedded credentials. The verified server baseline is Linux `amd64`, Docker Engine 27+, and Docker Compose v2. Production credentials must come from the server secret manager or a root-owned environment file outside the repository.
+The checked-in images use pinned Debian Linux bases, multi-stage builds, non-root numeric users, health checks, bounded logs, and no embedded credentials. The verified server baseline is Linux `amd64`, Docker Engine 27+, and Docker Compose 2.24+. Production credentials must come from the server secret manager or a root-owned environment file outside the repository.
 
 On the server, create the configuration once and deploy through the checked-in wrapper:
 

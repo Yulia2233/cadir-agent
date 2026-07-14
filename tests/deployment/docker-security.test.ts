@@ -19,6 +19,7 @@ describe('API Docker image policy', () => {
     const env = {
       ...process.env,
       POSTGRES_PASSWORD: 'test-only-password',
+      DATABASE_URL: 'postgresql://cadir:test-only-password@postgres:5432/cadir?schema=public',
       S3_ACCESS_KEY: 'test-access-key',
       S3_SECRET_KEY: 'test-secret-key-value',
       SESSION_SECRET: '01234567890123456789012345678901',
@@ -62,6 +63,11 @@ describe('API Docker image policy', () => {
       expect.objectContaining({ target: '/data/workspaces' }),
     );
     expect(config.services.api?.environment?.S3_ENDPOINT).toBe('http://minio:9000');
+    expect(config.services.api?.networks).toEqual({
+      backend: null,
+      egress: null,
+      'runner-control': null,
+    });
     expect(config.services.runner?.networks).toEqual({ 'runner-control': null });
   });
 

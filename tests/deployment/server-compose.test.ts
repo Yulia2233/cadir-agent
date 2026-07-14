@@ -10,6 +10,7 @@ describe('server deployment contract', () => {
 
     for (const key of [
       'POSTGRES_PASSWORD',
+      'DATABASE_URL',
       'S3_ACCESS_KEY',
       'S3_SECRET_KEY',
       'SESSION_SECRET',
@@ -31,5 +32,9 @@ describe('server deployment contract', () => {
     expect(script).toContain("'config', '--quiet'");
     expect(script).toContain("'--wait'");
     expect(script).toContain('/health/ready');
+    expect(script).toContain("serverPlatform !== 'linux/x86_64'");
+    expect(script).toContain("assertMinimumVersion('Docker Engine', dockerVersion, 27)");
+    expect(script).toContain("assertMinimumVersion('Docker Compose', composeVersion, 2, 24)");
+    expect(script).toContain('(envMode & 0o077) !== 0');
   });
 });

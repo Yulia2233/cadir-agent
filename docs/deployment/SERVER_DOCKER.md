@@ -12,7 +12,7 @@ Rootless Docker is preferred. If rootful Docker is used, restrict membership of 
 
 ## Configuration
 
-Copy `infra/server.env.example` to `/etc/cadir/cadir.env`, fill every empty secret, and set mode `0600`. Do not place Provider API keys in Compose YAML, image layers, or source-controlled files. User Provider credentials are stored through the application encryption layer.
+Copy `infra/server.env.example` to `/etc/cadir/cadir.env`, fill every empty secret, and set mode `0600`. Set `DATABASE_URL` explicitly; percent-encode reserved characters in its password component. The deployment preflight rejects an environment file with group or other-user permissions. Do not place Provider API keys in Compose YAML, image layers, or source-controlled files. User Provider credentials are stored through the application encryption layer.
 
 Use random values of at least 32 bytes for session and CSRF secrets. `MODEL_CONFIG_KEK` is an application encryption key and must satisfy the API format documented by the secret-management runbook. `CORS_ORIGINS` must contain only the deployed HTTPS Web origins.
 
@@ -33,7 +33,7 @@ pnpm server:up
 pnpm server:health
 ```
 
-The `check` action validates Linux, Docker, Compose, the secret file, and the merged Compose model. The `up` action creates the edge network if needed, builds the images, waits for health checks, and removes orphan containers. The API deploys pending Prisma migrations before starting its listener.
+The `check` action validates Linux `amd64`, Docker Engine 27+, Docker Compose 2.24+, the secret file permissions, and the merged Compose model. The `up` action creates the edge network if needed, builds the images, waits for health checks, and removes orphan containers. The API deploys pending Prisma migrations before starting its listener.
 
 ## Security properties
 

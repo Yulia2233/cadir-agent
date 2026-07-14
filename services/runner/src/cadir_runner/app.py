@@ -2,6 +2,7 @@ import os
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
+import yaml
 from fastapi import FastAPI, Response, status
 
 from cadir_runner import __version__
@@ -26,11 +27,30 @@ def installed_sdk_version() -> str:
         return ""
 
 
+def installed_skill_version() -> str:
+    try:
+        skill_document = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        if not skill_document.startswith("---\n"):
+            return ""
+        _, front_matter, _ = skill_document.split("---", 2)
+        metadata = yaml.safe_load(front_matter)
+        if not isinstance(metadata, dict):
+            return ""
+        skill_metadata = metadata.get("metadata")
+        if not isinstance(skill_metadata, dict):
+            return ""
+        value = skill_metadata.get("version")
+        return value if isinstance(value, str) else ""
+    except (OSError, UnicodeError, ValueError, yaml.YAMLError):
+        return ""
+
+
 @app.get("/health/ready")
 async def ready(response: Response) -> dict[str, str]:
     sdk_version = os.environ.get("SIMPLECADAPI_VERSION", EXPECTED_CAD_VERSION)
     skill_version = os.environ.get("SIMPLECAD_SKILL_VERSION", EXPECTED_CAD_VERSION)
     actual_sdk_version = installed_sdk_version()
+    actual_skill_version = installed_skill_version()
     skill_files_exist = (SKILL_ROOT / "SKILL.md").is_file() and (
         SKILL_ROOT / "references" / "docs" / "api" / "README.md"
     ).is_file()
@@ -38,6 +58,7 @@ async def ready(response: Response) -> dict[str, str]:
         sdk_version != EXPECTED_CAD_VERSION
         or skill_version != sdk_version
         or actual_sdk_version != sdk_version
+        or actual_skill_version != skill_version
         or not skill_files_exist
     ):
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
@@ -45,7 +66,7 @@ async def ready(response: Response) -> dict[str, str]:
     return {
         "status": "ready",
         "simplecadapi": actual_sdk_version,
-        "skill": skill_version,
+        "skill": actual_skill_version,
     }
 
 

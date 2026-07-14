@@ -19,6 +19,7 @@ pydantic==2.11.7
 pydantic-core==2.33.2
 pygments==2.19.2
 pyparsing==3.2.3
+PyYAML==6.0.2
 python-dateutil==2.9.0.post0
 rich==14.0.0
 six==1.17.0
