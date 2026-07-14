@@ -9,13 +9,16 @@ import {
   SquareDashedMousePointer,
 } from 'lucide-react';
 import { IconButton } from './IconButton';
+import { CadViewer } from './CadViewer';
 
 export function ModelPanel({
   selectionMode,
   onMode,
+  glbUrl = null,
 }: {
   selectionMode: 'face' | 'edge';
   onMode: (mode: 'face' | 'edge') => void;
+  glbUrl?: string | null;
 }) {
   return (
     <aside className="model-panel" aria-label="Model viewer">
@@ -59,18 +62,22 @@ export function ModelPanel({
           <span>Edge</span>
         </button>
       </div>
-      <div className="viewer-canvas empty">
-        <div className="axis-cue">
-          <span className="axis-z">Z</span>
-          <span className="axis-y">Y</span>
-          <span className="axis-x">X</span>
+      {glbUrl === null ? (
+        <div className="viewer-canvas empty">
+          <div className="axis-cue">
+            <span className="axis-z">Z</span>
+            <span className="axis-y">Y</span>
+            <span className="axis-x">X</span>
+          </div>
+          <div>
+            <Box size={36} />
+            <strong>Model viewer</strong>
+            <span>A validated revision will appear here.</span>
+          </div>
         </div>
-        <div>
-          <Box size={36} />
-          <strong>Model viewer</strong>
-          <span>A validated revision will appear here.</span>
-        </div>
-      </div>
+      ) : (
+        <CadViewer url={glbUrl} />
+      )}
       <section className="model-summary">
         <h2>Geometry</h2>
         <dl>
