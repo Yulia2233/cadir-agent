@@ -41,11 +41,36 @@ describe('task worker workflow contract', () => {
     );
     const execute = processBody.indexOf("'/internal/execute'");
     const inspect = processBody.indexOf('await this.validateModel');
+    const derive = processBody.indexOf('await this.deriveArtifacts');
     const publish = processBody.indexOf('await this.publishRevision');
 
     expect(execute).toBeGreaterThan(-1);
     expect(execute).toBeLessThan(inspect);
-    expect(inspect).toBeLessThan(publish);
+    expect(inspect).toBeLessThan(derive);
+    expect(derive).toBeLessThan(publish);
     expect(source).toContain("'/internal/inspect'");
+    expect(source).toContain("'/internal/derive'");
+  });
+
+  it('requires the complete revision artifact package before publish', async () => {
+    const source = await readFile(
+      new URL('../src/services/task-worker.ts', import.meta.url),
+      'utf8',
+    );
+    for (const artifact of [
+      'PREVIEW_ISO',
+      'PREVIEW_FRONT',
+      'PREVIEW_BACK',
+      'PREVIEW_LEFT',
+      'PREVIEW_RIGHT',
+      'PREVIEW_TOP',
+      'PREVIEW_BOTTOM',
+      'GLB',
+      'TOPOLOGY_MAP',
+      'BREP_EDGES',
+      'BREP',
+    ]) {
+      expect(source).toContain(`'${artifact}'`);
+    }
   });
 });
