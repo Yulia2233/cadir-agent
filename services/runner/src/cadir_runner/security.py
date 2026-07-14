@@ -13,7 +13,6 @@ BLOCKED_MODULES = frozenset(
         "importlib",
         "multiprocessing",
         "os",
-        "pathlib",
         "requests",
         "shutil",
         "socket",

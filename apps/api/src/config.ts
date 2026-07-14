@@ -20,6 +20,11 @@ const configSchema = z.object({
   RUNNER_INTERNAL_URL: z.string().url().default('http://runner:8091'),
   SIMPLECADAPI_VERSION: z.literal('2.0.1b1').default('2.0.1b1'),
   SIMPLECAD_SKILL_VERSION: z.literal('2.0.1b1').default('2.0.1b1'),
+  TASK_WORKER_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
+  TASK_WORKER_POLL_SECONDS: z.coerce.number().int().min(1).max(30).default(2),
 });
 
 export type AppConfig = z.infer<typeof configSchema>;

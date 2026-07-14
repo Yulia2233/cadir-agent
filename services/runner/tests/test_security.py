@@ -22,10 +22,16 @@ def test_requires_graph_session() -> None:
         validate_model_code("print('no graph')")
 
 
-@pytest.mark.parametrize("module", ["os", "subprocess", "socket", "requests", "pathlib"])
+@pytest.mark.parametrize("module", ["os", "subprocess", "socket", "requests"])
 def test_blocks_dangerous_imports(module: str) -> None:
     with pytest.raises(CodePolicyError, match="Import is not allowed"):
         validate_model_code(f"import {module}\nGraphSession()")
+
+
+def test_allows_pathlib_for_fixed_model_artifact_paths() -> None:
+    validate_model_code(
+        "from pathlib import Path\nfrom simplecadapi import GraphSession\nGraphSession()"
+    )
 
 
 @pytest.mark.parametrize("call", ["open('x')", "exec('x=1')", "eval('1')"])
