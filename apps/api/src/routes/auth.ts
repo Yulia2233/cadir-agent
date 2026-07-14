@@ -53,6 +53,13 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
         sameSite: 'strict',
         expires: expiresAt,
       });
+      reply.setCookie('cadir_csrf', csrfToken, {
+        path: '/',
+        httpOnly: false,
+        secure: app.config.NODE_ENV !== 'development',
+        sameSite: 'strict',
+        expires: expiresAt,
+      });
       await app.prisma.auditLog.create({
         data: {
           actorUserId: user.id,
@@ -76,6 +83,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       data: { revokedAt: new Date() },
     });
     reply.clearCookie(SESSION_COOKIE, { path: '/' });
+    reply.clearCookie('cadir_csrf', { path: '/' });
     return reply.status(204).send();
   });
 

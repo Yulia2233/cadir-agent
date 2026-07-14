@@ -1,7 +1,17 @@
-import { Box, CheckCircle2, Download, FileCode2 } from 'lucide-react';
+import { Box, CheckCircle2, Download, FileCode2, WifiOff } from 'lucide-react';
 import type { TimelineMessage } from '../types';
 
-export function Timeline({ messages, running }: { messages: TimelineMessage[]; running: boolean }) {
+export function Timeline({
+  messages,
+  running,
+  phaseLabel,
+  streamStatus,
+}: {
+  messages: TimelineMessage[];
+  running: boolean;
+  phaseLabel: string;
+  streamStatus: 'idle' | 'connected' | 'reconnecting';
+}) {
   return (
     <div className="timeline" aria-live="polite">
       {messages.length === 0 ? (
@@ -19,7 +29,12 @@ export function Timeline({ messages, running }: { messages: TimelineMessage[]; r
       {running && (
         <div className="phase-row">
           <span className="spinner" />
-          Reading SimpleCADAPI Skill
+          {phaseLabel}
+        </div>
+      )}
+      {streamStatus === 'reconnecting' && (
+        <div className="stream-warning" role="status">
+          <WifiOff size={14} /> Reconnecting to task events
         </div>
       )}
     </div>

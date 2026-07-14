@@ -4,8 +4,11 @@ import {
   cadirEventSchema,
   eventDataSchemas,
   eventTypeSchema,
+  freecadConversionSchema,
+  requirementSnapshotSchema,
   restApiSchema,
   taskPhaseSchema,
+  topologyMapSchema,
   viewerManifestSchema,
 } from '../src/index.js';
 
@@ -83,5 +86,57 @@ describe('shared contracts', () => {
       expiresAt: null,
     });
     expect(result.success).toBe(false);
+  });
+
+  it('validates a complete requirement snapshot', () => {
+    const snapshot = requirementSnapshotSchema.parse({
+      version: 1,
+      unit: 'mm',
+      dimensions: { length: 100, width: 50, thickness: 5 },
+      features: ['four mounting holes'],
+      constraints: ['single solid'],
+      solidCount: 1,
+      freecadRequested: false,
+      selectionIds: [],
+      attachmentIds: [],
+      parentRevisionId: null,
+      missing: [],
+      conflicts: [],
+    });
+    expect(snapshot.dimensions.thickness).toBe(5);
+  });
+
+  it('validates topology ranges and geometry signatures', () => {
+    const map = topologyMapSchema.parse({
+      version: 'viewer-1',
+      revisionId: 'd53e793a-a24d-4e33-a952-5b28faac665c',
+      unit: 'mm',
+      faces: [
+        {
+          displayId: 'F1',
+          topologyRef: 'face_1',
+          tags: [],
+          signature: { geometryType: 'plane' },
+          adjacentTopologyRefs: [],
+          triangleStart: 0,
+          triangleCount: 2,
+        },
+      ],
+      edges: [],
+    });
+    expect(map.faces[0]?.triangleCount).toBe(2);
+  });
+
+  it('distinguishes failed FreeCAD conversion from core CAD success', () => {
+    const conversion = freecadConversionSchema.parse({
+      status: 'failed',
+      documentArtifactId: null,
+      scriptArtifactId: null,
+      reason: 'worker unavailable',
+      freecadVersion: null,
+      adapterVersion: null,
+      workerVersion: null,
+    });
+    expect(conversion.status).toBe('failed');
   });
 });

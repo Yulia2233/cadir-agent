@@ -7,6 +7,8 @@ export const eventTypeSchema = z.enum([
   'task.phase.changed',
   'task.completed',
   'task.failed',
+  'task.abort.requested',
+  'task.aborted',
   'agent.message.delta',
   'agent.message.completed',
   'skill.loading',
@@ -27,6 +29,12 @@ export const eventTypeSchema = z.enum([
   'artifact.available',
   'selection.invalidated',
   'case.candidate.submitted',
+  'upload.processing',
+  'upload.ready',
+  'upload.failed',
+  'freecad.conversion.started',
+  'freecad.conversion.completed',
+  'freecad.conversion.failed',
 ]);
 export type EventType = z.infer<typeof eventTypeSchema>;
 
@@ -45,6 +53,8 @@ export const eventDataSchemas = {
   'task.phase.changed': phaseDataSchema,
   'task.completed': z.object({ revisionId: idSchema.nullable(), summary: z.string().max(2_000) }),
   'task.failed': z.object({ code: z.string().min(1).max(100), message: z.string().max(2_000) }),
+  'task.abort.requested': z.object({ taskId: idSchema }).strict(),
+  'task.aborted': z.object({ taskId: idSchema }).strict(),
   'agent.message.delta': z.object({ messageId: idSchema, delta: z.string().max(16_384) }),
   'agent.message.completed': z.object({ messageId: idSchema }),
   'skill.loading': z.object({ name: z.literal('simplecadapi') }),
@@ -73,6 +83,22 @@ export const eventDataSchemas = {
     .strict(),
   'selection.invalidated': z.object({ selectionId: idSchema, reason: z.string().max(500) }),
   'case.candidate.submitted': z.object({ candidateId: idSchema }),
+  'upload.processing': z.object({ uploadId: idSchema, stage: z.string().min(1).max(100) }).strict(),
+  'upload.ready': z.object({ uploadId: idSchema }).strict(),
+  'upload.failed': z
+    .object({ uploadId: idSchema, code: z.string().min(1).max(100), message: z.string().max(500) })
+    .strict(),
+  'freecad.conversion.started': z.object({ revisionId: idSchema }).strict(),
+  'freecad.conversion.completed': z
+    .object({ revisionId: idSchema, artifactIds: z.array(idSchema).min(1).max(2) })
+    .strict(),
+  'freecad.conversion.failed': z
+    .object({
+      revisionId: idSchema,
+      status: z.enum(['failed', 'unsupported']),
+      reason: z.string().max(500),
+    })
+    .strict(),
 } as const satisfies Record<EventType, z.ZodTypeAny>;
 
 const eventEnvelopeBaseSchema = z.object({

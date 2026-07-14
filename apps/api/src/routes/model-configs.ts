@@ -4,13 +4,14 @@ import { decryptSecret, encryptSecret } from '../lib/crypto.js';
 import { notFound } from '../lib/errors.js';
 import { validateExternalBaseUrl } from '../lib/ssrf.js';
 
-const createSchema = z.object({
+const configSchema = z.object({
   provider: z.string().trim().min(1).max(80),
   baseUrl: z.string().trim().max(2048),
   apiKey: z.string().min(1).max(4096),
   modelId: z.string().trim().min(1).max(200),
   isDefault: z.boolean().default(false),
 });
+const updateSchema = configSchema.partial().refine((value) => Object.keys(value).length > 0);
 
 const idSchema = z.object({ id: z.string().uuid() });
 
@@ -45,7 +46,7 @@ export const modelConfigRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post('/api/me/model-configs', { preHandler: app.authenticate }, async (request, reply) => {
-    const input = createSchema.parse(request.body);
+    const input = configSchema.parse(request.body);
     const baseUrl = await validateExternalBaseUrl(input.baseUrl);
     const result = await app.prisma.$transaction(async (tx) => {
       const count = await tx.userModelConfig.count({ where: { userId: request.authUser.id } });
@@ -78,6 +79,77 @@ export const modelConfigRoutes: FastifyPluginAsync = async (app) => {
     });
     return reply.status(201).send(publicConfig(result));
   });
+
+  app.patch('/api/me/model-configs/:id', { preHandler: app.authenticate }, async (request) => {
+    const { id } = idSchema.parse(request.params);
+    const input = updateSchema.parse(request.body);
+    const existing = await app.prisma.userModelConfig.findFirst({
+      where: { id, userId: request.authUser.id },
+    });
+    if (existing === null) throw notFound();
+    const baseUrl =
+      input.baseUrl === undefined
+        ? existing.baseUrl
+        : (await validateExternalBaseUrl(input.baseUrl)).toString().replace(/\/$/, '');
+    return app.prisma.$transaction(async (tx) => {
+      if (input.isDefault === true) {
+        await tx.userModelConfig.updateMany({
+          where: { userId: request.authUser.id },
+          data: { isDefault: false },
+        });
+      }
+      const updated = await tx.userModelConfig.update({
+        where: { id },
+        data: {
+          ...(input.provider === undefined ? {} : { provider: input.provider }),
+          baseUrl,
+          ...(input.modelId === undefined ? {} : { modelId: input.modelId }),
+          ...(input.isDefault === undefined ? {} : { isDefault: input.isDefault }),
+          ...(input.apiKey === undefined
+            ? {}
+            : { encryptedApiKey: encryptSecret(input.apiKey, app.config.MODEL_CONFIG_KEK) }),
+        },
+        select: {
+          id: true,
+          provider: true,
+          baseUrl: true,
+          modelId: true,
+          isDefault: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+      return publicConfig(updated);
+    });
+  });
+
+  app.delete(
+    '/api/me/model-configs/:id',
+    { preHandler: app.authenticate },
+    async (request, reply) => {
+      const { id } = idSchema.parse(request.params);
+      const existing = await app.prisma.userModelConfig.findFirst({
+        where: { id, userId: request.authUser.id },
+      });
+      if (existing === null) throw notFound();
+      await app.prisma.$transaction(async (tx) => {
+        await tx.userModelConfig.delete({ where: { id } });
+        if (existing.isDefault) {
+          const replacement = await tx.userModelConfig.findFirst({
+            where: { userId: request.authUser.id },
+            orderBy: { createdAt: 'asc' },
+          });
+          if (replacement !== null) {
+            await tx.userModelConfig.update({
+              where: { id: replacement.id },
+              data: { isDefault: true },
+            });
+          }
+        }
+      });
+      return reply.status(204).send();
+    },
+  );
 
   app.post('/api/me/model-configs/:id/test', { preHandler: app.authenticate }, async (request) => {
     const { id } = idSchema.parse(request.params);

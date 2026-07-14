@@ -1,4 +1,5 @@
-import { Archive, MoreHorizontal, Plus, Search } from 'lucide-react';
+import { Archive, MoreHorizontal, PanelLeft, Plus, Search } from 'lucide-react';
+import { useMemo, useState } from 'react';
 import type { ConversationSummary } from '../types';
 import { IconButton } from './IconButton';
 
@@ -16,14 +17,25 @@ export function Sidebar({
   activeId,
   onNew,
   onSelect,
+  onToggle,
+  onAction,
 }: {
   conversations: ConversationSummary[];
   activeId: string | null;
   onNew: () => void;
   onSelect: (id: string) => void;
+  onToggle: () => void;
+  onAction: (id: string, action: 'rename' | 'archive' | 'delete') => void;
 }) {
-  const running = conversations.filter((item) => item.status === 'RUNNING');
-  const history = conversations.filter((item) => item.status !== 'RUNNING');
+  const [query, setQuery] = useState('');
+  const filtered = useMemo(() => {
+    const normalized = query.trim().toLocaleLowerCase();
+    return normalized.length === 0
+      ? conversations
+      : conversations.filter((item) => item.title.toLocaleLowerCase().includes(normalized));
+  }, [conversations, query]);
+  const running = filtered.filter((item) => item.status === 'RUNNING');
+  const history = filtered.filter((item) => item.status !== 'RUNNING');
 
   return (
     <aside className="sidebar" aria-label="Conversations">
@@ -35,6 +47,9 @@ export function Sidebar({
           <strong>CADIR</strong>
           <span>CAD workspace</span>
         </div>
+        <IconButton label="Collapse conversations" onClick={onToggle}>
+          <PanelLeft size={17} />
+        </IconButton>
       </div>
       <button className="primary-command" onClick={onNew}>
         <Plus size={17} />
@@ -42,12 +57,29 @@ export function Sidebar({
       </button>
       <label className="search-field">
         <Search size={16} />
-        <input placeholder="Search conversations" aria-label="Search conversations" />
+        <input
+          placeholder="Search conversations"
+          aria-label="Search conversations"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
       </label>
       {running.length > 0 && (
-        <ConversationGroup title="Active" items={running} activeId={activeId} onSelect={onSelect} />
+        <ConversationGroup
+          title="Active"
+          items={running}
+          activeId={activeId}
+          onSelect={onSelect}
+          onAction={onAction}
+        />
       )}
-      <ConversationGroup title="History" items={history} activeId={activeId} onSelect={onSelect} />
+      <ConversationGroup
+        title="History"
+        items={history}
+        activeId={activeId}
+        onSelect={onSelect}
+        onAction={onAction}
+      />
       <button className="archive-link">
         <Archive size={16} />
         Archived
@@ -61,12 +93,16 @@ function ConversationGroup({
   items,
   activeId,
   onSelect,
+  onAction,
 }: {
   title: string;
   items: ConversationSummary[];
   activeId: string | null;
   onSelect: (id: string) => void;
+  onAction: (id: string, action: 'rename' | 'archive' | 'delete') => void;
 }) {
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
+
   return (
     <section className="conversation-group">
       <h2>{title}</h2>
@@ -85,12 +121,36 @@ function ConversationGroup({
             <span className="conversation-title">{item.title}</span>
             <span className={`status-dot status-${item.status.toLowerCase()}`} aria-hidden="true" />
             <span className="conversation-meta">{statusLabel[item.status]}</span>
-            <IconButton
-              label={`Actions for ${item.title}`}
-              onClick={(event) => event.stopPropagation()}
-            >
-              <MoreHorizontal size={16} />
-            </IconButton>
+            <div className="row-actions">
+              <IconButton
+                label={`Actions for ${item.title}`}
+                aria-expanded={openMenu === item.id}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setOpenMenu(openMenu === item.id ? null : item.id);
+                }}
+              >
+                <MoreHorizontal size={16} />
+              </IconButton>
+              {openMenu === item.id && (
+                <div className="conversation-menu" role="menu">
+                  {(['rename', 'archive', 'delete'] as const).map((action) => (
+                    <button
+                      key={action}
+                      role="menuitem"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onAction(item.id, action);
+                        setOpenMenu(null);
+                      }}
+                    >
+                      {action[0]?.toUpperCase()}
+                      {action.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         ))}
       </div>

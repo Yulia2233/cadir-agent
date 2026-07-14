@@ -1,5 +1,5 @@
 FROM python:3.12.11-slim-bookworm@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7 AS build
-ENV PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1 PIP_DEFAULT_TIMEOUT=300
 WORKDIR /build
 COPY services/runner/pyproject.toml ./
 COPY services/runner/src ./src
@@ -10,7 +10,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONNOUSERSITE=1
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 \
+    && apt-get install -y --no-install-recommends \
+        libgl1 \
+        libglib2.0-0 \
+        libx11-6 \
+        libxext6 \
+        libxrender1 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 cadir-workspace \
     && groupadd --gid 10002 cad-runner \

@@ -96,6 +96,10 @@ jobs:
         env:
           RUNNER_IMAGE: cadir-runner:ci
         run: node tests/deployment/verify-runner-container.mjs
+      - name: Verify Runner CAD kernel and canonical exports
+        env:
+          RUNNER_IMAGE: cadir-runner:ci
+        run: node tests/deployment/verify-runner-cad.mjs
       - name: Scan filesystem
         uses: aquasecurity/trivy-action@0.30.0
         with:

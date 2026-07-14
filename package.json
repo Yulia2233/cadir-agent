@@ -24,7 +24,8 @@
     "server:up": "node scripts/server-deploy.mjs up",
     "server:health": "node scripts/server-deploy.mjs health",
     "server:down": "node scripts/server-deploy.mjs down",
-    "test:runner-container": "node tests/deployment/verify-runner-container.mjs"
+    "test:runner-container": "node tests/deployment/verify-runner-container.mjs",
+    "test:runner-cad": "node tests/deployment/verify-runner-cad.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.55.0",
