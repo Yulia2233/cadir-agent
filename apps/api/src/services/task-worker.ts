@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { TaskMode, TaskPhase, TaskStatus, type PrismaClient } from '@prisma/client';
 import type { Redis } from 'ioredis';
@@ -112,7 +112,12 @@ export class TaskWorker {
       const loadedSkill = await this.loadRequiredSkill(task.conversationId, task.id);
       if (!loadedSkill) throw new Error('Required SimpleCADAPI Skill did not load');
       await this.move(task.id, task.conversationId, TaskPhase.PLAN, TaskPhase.CODE);
-      const modelPath = await this.prepareModel(task.workspaceId, task.id, snapshot);
+      const modelPath = await this.prepareModel(
+        task.workspaceId,
+        task.id,
+        snapshot,
+        task.conversation.currentRevisionId,
+      );
       await this.move(task.id, task.conversationId, TaskPhase.CODE, TaskPhase.EXECUTE);
       const runtimeId = randomUUID();
       await this.context.prisma.task.update({ where: { id: task.id }, data: { runtimeId } });
@@ -246,6 +251,7 @@ export class TaskWorker {
     workspaceId: string,
     taskId: string,
     snapshot: ReturnType<typeof requirementSnapshotSchema.parse>,
+    currentRevisionId: string | null,
   ): Promise<string> {
     const modelDirectory = path.join(
       this.context.workspaceRoot,
@@ -255,9 +261,32 @@ export class TaskWorker {
       'Model',
     );
     await mkdir(modelDirectory, { recursive: true, mode: 0o2770 });
+    const parentRevisionId = snapshot.parentRevisionId ?? currentRevisionId;
+    if (parentRevisionId !== null) {
+      const parent = await this.context.prisma.modelRevision.findFirst({
+        where: {
+          id: parentRevisionId,
+          status: 'SUCCEEDED',
+          conversation: { workspace: { id: workspaceId } },
+        },
+        select: { revisionNumber: true },
+      });
+      if (parent !== null) {
+        const parentModelDirectory = path.join(
+          this.context.workspaceRoot,
+          workspaceId,
+          'revisions',
+          String(parent.revisionNumber),
+          'Model',
+        );
+        await cp(parentModelDirectory, modelDirectory, { recursive: true, force: false });
+      }
+    }
     const length = snapshot.dimensions.length ?? 100;
     const width = snapshot.dimensions.width ?? 50;
     const thickness = snapshot.dimensions.thickness ?? 5;
+    // This deterministic baseline is replaced by the restricted model adapter once a provider is selected.
+    // Keeping generation here preserves the sole-entry and fixed-output contract in every environment.
     const source = `from pathlib import Path\nfrom simplecadapi import GraphSession, export_model_json, export_step, export_stl, make_box_rsolid\n\nmodel_dir = Path(__file__).resolve().parent\nwith GraphSession() as session:\n    result = make_box_rsolid(${length}, ${width}, ${thickness})\npayload = export_model_json(session)\n(model_dir / "model.json").write_text(payload, encoding="utf-8")\nexport_step(result, str(model_dir / "model.step"))\nexport_stl(result, str(model_dir / "model.stl"))\nprint({"event": "grounding", "solid_count": 1, "volume": result.get_volume(), "faces": len(result.get_faces()), "edges": len(result.get_edges())})\n`;
     const modelPath = path.join(modelDirectory, 'model.py');
     await writeFile(modelPath, source, { encoding: 'utf8', mode: 0o660 });
