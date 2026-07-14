@@ -1,0 +1,35 @@
+# Dependencies and builds
+node_modules/
+dist/
+*.tsbuildinfo
+coverage/
+.turbo/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Runtime data
+.data/
+runtime/
+uploads/
+playwright-report/
+test-results/
+
+# Editor and operating system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.swp
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/

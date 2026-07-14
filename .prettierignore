@@ -1,0 +1,10 @@
+node_modules
+dist
+coverage
+playwright-report
+test-results
+vendor
+pnpm-lock.yaml
+.mypy_cache
+.ruff_cache
+.pytest_cache

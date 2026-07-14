@@ -1,0 +1,28 @@
+services:
+  api:
+    environment:
+      NODE_ENV: production
+    ports: !reset []
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    networks:
+      - backend
+      - runner-control
+      - egress
+
+  web:
+    ports: !reset []
+    networks:
+      - backend
+      - edge
+
+networks:
+  edge:
+    external: true
+    name: ${EDGE_NETWORK:-cadir-edge}

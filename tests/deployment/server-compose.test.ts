@@ -1,0 +1,35 @@
+import { readFile } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
+
+describe('server deployment contract', () => {
+  it('documents an external secret file and has no credential values', async () => {
+    const example = await readFile(
+      new URL('../../infra/server.env.example', import.meta.url),
+      'utf8',
+    );
+
+    for (const key of [
+      'POSTGRES_PASSWORD',
+      'S3_ACCESS_KEY',
+      'S3_SECRET_KEY',
+      'SESSION_SECRET',
+      'CSRF_SECRET',
+      'MODEL_CONFIG_KEK',
+    ]) {
+      expect(example).toMatch(new RegExp(`^${key}=$`, 'm'));
+    }
+    expect(example).not.toMatch(/sk-[A-Za-z0-9_-]{12,}/);
+  });
+
+  it('provides deterministic check, deploy, health, and teardown actions', async () => {
+    const script = await readFile(
+      new URL('../../scripts/server-deploy.mjs', import.meta.url),
+      'utf8',
+    );
+
+    expect(script).toContain("['check', 'up', 'health', 'down']");
+    expect(script).toContain("'config', '--quiet'");
+    expect(script).toContain("'--wait'");
+    expect(script).toContain('/health/ready');
+  });
+});

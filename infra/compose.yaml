@@ -1,0 +1,196 @@
+name: cadir-agent
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  init: true
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options:
+      max-size: ${CONTAINER_LOG_MAX_SIZE:-10m}
+      max-file: ${CONTAINER_LOG_MAX_FILES:-3}
+  networks:
+    - backend
+
+services:
+  postgres:
+    <<: *service-defaults
+    image: postgres:17.5-bookworm@sha256:fbcea1bd13b6a882cd6caa6b58db3ae5c102efe50ec625b3e2a5cbc50db5bfe4
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cadir}
+      POSTGRES_USER: ${POSTGRES_USER:-cadir}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    stop_grace_period: 30s
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    <<: *service-defaults
+    image: redis:8.0.3-bookworm@sha256:be0a135f1955140436b9114da96dd22fbedb874469400b6ef458cc0d42155de0
+    command: ['redis-server', '--appendonly', 'yes', '--save', '60', '1']
+    volumes:
+      - redis-data:/data
+    stop_grace_period: 30s
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    <<: *service-defaults
+    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e
+    command: ['server', '/data', '--console-address', ':9001']
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:?S3_ACCESS_KEY is required}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?S3_SECRET_KEY is required}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ['CMD', 'curl', '-fsS', 'http://127.0.0.1:9000/minio/health/live']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio-init:
+    <<: *service-defaults
+    image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z@sha256:aead63c77f9db9107f1696fb08ecb0faeda23729cde94b0f663edf4fe09728e3
+    restart: 'no'
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        mc alias set local http://minio:9000 "$${S3_ACCESS_KEY}" "$${S3_SECRET_KEY}"
+        mc mb --ignore-existing "local/$${S3_BUCKET}"
+        mc anonymous set none "local/$${S3_BUCKET}"
+    environment:
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?S3_ACCESS_KEY is required}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY is required}
+      S3_BUCKET: ${S3_BUCKET:-cadir-artifacts}
+
+  workspace-init:
+    <<: *service-defaults
+    image: busybox:1.37.0-glibc@sha256:4279d9b47df4c1b02d80efd8d02cd59b3a8182c1e785a4ff3f6983bee19dc8b0
+    restart: 'no'
+    user: '0:0'
+    command: ['sh', '-ec', 'chown 10001:10001 /data/workspaces && chmod 2770 /data/workspaces']
+    volumes:
+      - workspace-data:/data/workspaces:rw
+
+  api:
+    <<: *service-defaults
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    image: cadir-api:${CADIR_VERSION:-dev}
+    read_only: true
+    user: '10001:10001'
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    environment:
+      NODE_ENV: production
+      API_HOST: 0.0.0.0
+      API_PORT: 8080
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cadir}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cadir}?schema=public
+      REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET: ${S3_BUCKET:-cadir-artifacts}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?S3_ACCESS_KEY is required}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY is required}
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required}
+      CSRF_SECRET: ${CSRF_SECRET:?CSRF_SECRET is required}
+      MODEL_CONFIG_KEK: ${MODEL_CONFIG_KEK:?MODEL_CONFIG_KEK is required}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      WORKSPACE_ROOT: /data/workspaces
+      RUNNER_INTERNAL_URL: http://runner:8091
+      SIMPLECADAPI_VERSION: 2.0.1b1
+      SIMPLECAD_SKILL_VERSION: 2.0.1b1
+    volumes:
+      - workspace-data:/data/workspaces:rw
+    ports:
+      - '${API_PORT:-8080}:8080'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      workspace-init:
+        condition: service_completed_successfully
+      runner:
+        condition: service_healthy
+    networks:
+      - backend
+      - runner-control
+      - egress
+    stop_grace_period: 30s
+
+  runner:
+    <<: *service-defaults
+    build:
+      context: ..
+      dockerfile: services/runner/Dockerfile
+    image: cadir-runner:${CADIR_VERSION:-dev}
+    read_only: true
+    user: '10002:10002'
+    group_add:
+      - '10001'
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    pids_limit: 64
+    mem_limit: 4g
+    cpus: 2.0
+    environment:
+      WORKSPACE_ROOT: /data/workspaces
+      SIMPLECAD_SKILL_ROOT: /opt/simplecadapi-skill
+      SIMPLECADAPI_VERSION: 2.0.1b1
+      SIMPLECAD_SKILL_VERSION: 2.0.1b1
+    volumes:
+      - workspace-data:/data/workspaces:rw
+    networks:
+      - runner-control
+    stop_grace_period: 10s
+
+  web:
+    <<: *service-defaults
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+    image: cadir-web:${CADIR_VERSION:-dev}
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+      - /var/cache/nginx:rw,noexec,nosuid,size=32m
+      - /var/run:rw,noexec,nosuid,size=8m
+    ports:
+      - '${WEB_PORT:-3000}:8080'
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - backend
+    stop_grace_period: 15s
+
+networks:
+  backend:
+    internal: true
+  runner-control:
+    internal: true
+  egress:
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
+  workspace-data:

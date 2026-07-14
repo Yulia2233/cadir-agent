@@ -1,0 +1,480 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  REVIEWER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+  DELETED
+}
+
+enum ConversationStatus {
+  IDLE
+  RUNNING
+  WAITING_USER
+  FAILED
+  COMPLETED
+  ARCHIVED
+  DELETING
+  DELETED
+}
+
+enum MessageRole {
+  USER
+  AGENT
+  SYSTEM
+}
+
+enum TaskStatus {
+  QUEUED
+  RUNNING
+  WAITING_USER
+  NEEDS_USER
+  ABORTING
+  ABORTED
+  FAILED
+  COMPLETED
+}
+
+enum TaskMode {
+  AUTO
+  PLAN
+  TARGET
+}
+
+enum TaskPhase {
+  DOMAIN_GUARD
+  ANALYZE
+  WAITING_USER
+  RETRIEVE
+  PLAN
+  CODE
+  EXECUTE
+  VALIDATE
+  VISUAL_REVIEW
+  PUBLISH
+  CASE_PACKAGE
+  CASE_CANDIDATE
+  REJECTED
+  NEEDS_USER
+  FAILED
+  COMPLETED
+}
+
+enum WorkspaceStatus {
+  ACTIVE
+  ARCHIVED
+  DELETING
+  DELETED
+}
+
+enum RevisionStatus {
+  PUBLISHING
+  SUCCEEDED
+  FAILED
+}
+
+enum ValidationStatus {
+  PENDING
+  PASSED
+  FAILED
+}
+
+enum SelectionStatus {
+  ACTIVE
+  RECOVERED
+  AMBIGUOUS
+  INVALID
+}
+
+enum CandidateStatus {
+  PRECHECKING
+  PRECHECK_FAILED
+  CANDIDATE
+  APPROVED
+  REJECTED
+  DUPLICATE
+  DELETING
+  DELETED
+}
+
+enum CaseStatus {
+  PUBLISHED
+  DEPRECATED
+  UNPUBLISHED
+}
+
+model User {
+  id             String              @id @default(uuid()) @db.Uuid
+  email          String              @unique @db.VarChar(320)
+  passwordHash   String              @map("password_hash")
+  displayName    String              @map("display_name") @db.VarChar(120)
+  role           UserRole            @default(USER)
+  status         UserStatus          @default(ACTIVE)
+  createdAt      DateTime            @default(now()) @map("created_at")
+  updatedAt      DateTime            @updatedAt @map("updated_at")
+  sessions       AuthSession[]
+  modelConfigs   UserModelConfig[]
+  conversations  Conversation[]
+  messages       Message[]
+  tasks          Task[]
+  ownedWorkspaces Workspace[]
+  selections     Selection[]
+  reviews        ModelCaseReview[]
+  auditLogs      AuditLog[]
+  consents       ConsentRecord[]
+  submittedCandidates ModelCaseCandidate[]
+  retrievalLogs   ModelCaseRetrievalLog[]
+
+  @@map("users")
+}
+
+model AuthSession {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  tokenHash  String   @unique @map("token_hash") @db.Char(64)
+  csrfHash   String   @map("csrf_hash") @db.Char(64)
+  expiresAt  DateTime @map("expires_at")
+  revokedAt  DateTime? @map("revoked_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("auth_sessions")
+}
+
+model UserModelConfig {
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          String   @map("user_id") @db.Uuid
+  provider        String   @db.VarChar(80)
+  baseUrl         String   @map("base_url") @db.VarChar(2048)
+  encryptedApiKey String   @map("encrypted_api_key")
+  modelId         String   @map("model_id") @db.VarChar(200)
+  isDefault       Boolean  @default(false) @map("is_default")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isDefault])
+  @@map("user_model_configs")
+}
+
+model Conversation {
+  id                   String             @id @default(uuid()) @db.Uuid
+  userId               String             @map("user_id") @db.Uuid
+  title                String             @default("New CAD conversation") @db.VarChar(160)
+  titleSource          String             @default("system") @map("title_source") @db.VarChar(20)
+  opencodeSessionId    String             @unique @map("opencode_session_id") @db.VarChar(160)
+  currentRevisionId    String?            @map("current_revision_id") @db.Uuid
+  status               ConversationStatus @default(IDLE)
+  archivedAt           DateTime?          @map("archived_at")
+  deletedAt            DateTime?          @map("deleted_at")
+  createdAt            DateTime           @default(now()) @map("created_at")
+  updatedAt            DateTime           @updatedAt @map("updated_at")
+  user                 User               @relation(fields: [userId], references: [id], onDelete: Restrict)
+  workspace            Workspace?
+  currentRevision      ModelRevision?      @relation("CurrentRevision", fields: [currentRevisionId], references: [id], onDelete: SetNull)
+  messages             Message[]
+  tasks                Task[]
+  revisions            ModelRevision[]     @relation("ConversationRevisions")
+  selections           Selection[]
+  events               DomainEvent[]
+  uploads              Upload[]
+  retrievalLogs        ModelCaseRetrievalLog[]
+
+  @@index([userId, status, updatedAt(sort: Desc)])
+  @@unique([currentRevisionId])
+  @@map("conversations")
+}
+
+model Message {
+  id                String      @id @default(uuid()) @db.Uuid
+  conversationId    String      @map("conversation_id") @db.Uuid
+  userId            String?     @map("user_id") @db.Uuid
+  taskId            String?     @map("task_id") @db.Uuid
+  role              MessageRole
+  content           String
+  structuredParts   Json        @default("[]") @map("structured_parts")
+  opencodeMessageId String?     @map("opencode_message_id") @db.VarChar(160)
+  idempotencyKey    String?     @map("idempotency_key") @db.VarChar(160)
+  createdAt         DateTime    @default(now()) @map("created_at")
+  conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user              User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  task              Task?       @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@unique([conversationId, idempotencyKey])
+  @@index([conversationId, createdAt, id])
+  @@map("messages")
+}
+
+model Task {
+  id                  String     @id @default(uuid()) @db.Uuid
+  conversationId      String     @map("conversation_id") @db.Uuid
+  userId              String     @map("user_id") @db.Uuid
+  workspaceId         String     @map("workspace_id") @db.Uuid
+  status              TaskStatus @default(QUEUED)
+  currentPhase        TaskPhase  @default(DOMAIN_GUARD) @map("current_phase")
+  mode                TaskMode   @default(AUTO)
+  requirementSnapshot Json       @default("{}") @map("requirement_snapshot")
+  freecadRequested    Boolean    @default(false) @map("freecad_requested")
+  runtimeId           String?    @map("runtime_id") @db.VarChar(160)
+  error               Json?
+  iterationCount      Int        @default(0) @map("iteration_count")
+  abortedAt           DateTime?  @map("aborted_at")
+  createdAt           DateTime   @default(now()) @map("created_at")
+  updatedAt           DateTime   @updatedAt @map("updated_at")
+  conversation        Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user                User       @relation(fields: [userId], references: [id], onDelete: Restrict)
+  workspace           Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  messages            Message[]
+  revisions           ModelRevision[]
+  events              DomainEvent[]
+  retrievalLogs       ModelCaseRetrievalLog[]
+
+  @@index([conversationId, status, createdAt])
+  @@index([userId, status])
+  @@map("tasks")
+}
+
+model Workspace {
+  id                    String          @id @default(uuid()) @db.Uuid
+  conversationId        String          @unique @map("conversation_id") @db.Uuid
+  ownerUserId           String          @map("owner_user_id") @db.Uuid
+  storagePath           String          @unique @map("storage_path")
+  status                WorkspaceStatus @default(ACTIVE)
+  runtimeImageVersion   String          @map("runtime_image_version") @db.VarChar(160)
+  simplecadapiVersion   String          @map("simplecadapi_version") @db.VarChar(40)
+  skillVersion          String          @map("skill_version") @db.VarChar(40)
+  createdAt             DateTime        @default(now()) @map("created_at")
+  updatedAt             DateTime        @updatedAt @map("updated_at")
+  owner                 User            @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  conversation          Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  tasks                 Task[]
+
+  @@index([ownerUserId, status])
+  @@map("workspaces")
+}
+
+model ModelRevision {
+  id                String           @id @default(uuid()) @db.Uuid
+  conversationId    String           @map("conversation_id") @db.Uuid
+  taskId            String           @map("task_id") @db.Uuid
+  revisionNumber    Int              @map("revision_number")
+  parentRevisionId  String?          @map("parent_revision_id") @db.Uuid
+  status            RevisionStatus   @default(PUBLISHING)
+  validationStatus  ValidationStatus @default(PENDING) @map("validation_status")
+  metadata          Json             @default("{}")
+  createdAt         DateTime         @default(now()) @map("created_at")
+  conversation      Conversation     @relation("ConversationRevisions", fields: [conversationId], references: [id], onDelete: Cascade)
+  task              Task             @relation(fields: [taskId], references: [id], onDelete: Restrict)
+  parentRevision    ModelRevision?   @relation("RevisionParent", fields: [parentRevisionId], references: [id], onDelete: SetNull)
+  children          ModelRevision[]  @relation("RevisionParent")
+  currentFor        Conversation[]   @relation("CurrentRevision")
+  artifacts         Artifact[]
+  selections        Selection[]
+  candidate         ModelCaseCandidate?
+
+  @@unique([conversationId, revisionNumber])
+  @@index([conversationId, status, revisionNumber(sort: Desc)])
+  @@map("model_revisions")
+}
+
+model Artifact {
+  id          String   @id @default(uuid()) @db.Uuid
+  revisionId  String   @map("revision_id") @db.Uuid
+  type        String   @db.VarChar(80)
+  objectKey   String   @unique @map("object_key")
+  filename    String   @db.VarChar(255)
+  contentType String   @map("content_type") @db.VarChar(160)
+  size        BigInt
+  checksum    String   @db.Char(64)
+  backend     String   @db.VarChar(40)
+  createdAt   DateTime @default(now()) @map("created_at")
+  revision    ModelRevision @relation(fields: [revisionId], references: [id], onDelete: Cascade)
+
+  @@index([revisionId, type])
+  @@map("artifacts")
+}
+
+model Selection {
+  id             String          @id @default(uuid()) @db.Uuid
+  conversationId String          @map("conversation_id") @db.Uuid
+  revisionId     String          @map("revision_id") @db.Uuid
+  userId         String          @map("user_id") @db.Uuid
+  entityType     String          @map("entity_type") @db.VarChar(20)
+  topologyRef    String          @map("topology_ref") @db.VarChar(200)
+  displayId      String          @map("display_id") @db.VarChar(40)
+  tags           Json            @default("[]")
+  signature      Json
+  qlSelector     Json            @map("ql_selector")
+  status         SelectionStatus @default(ACTIVE)
+  createdAt      DateTime        @default(now()) @map("created_at")
+  conversation   Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  revision       ModelRevision   @relation(fields: [revisionId], references: [id], onDelete: Cascade)
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, revisionId, userId])
+  @@map("selections")
+}
+
+model Upload {
+  id             String   @id @default(uuid()) @db.Uuid
+  conversationId String   @map("conversation_id") @db.Uuid
+  objectKey      String   @unique @map("object_key")
+  filename       String   @db.VarChar(255)
+  contentType    String   @map("content_type") @db.VarChar(160)
+  size           BigInt
+  checksum       String   @db.Char(64)
+  status         String   @db.VarChar(40)
+  createdAt      DateTime @default(now()) @map("created_at")
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, status])
+  @@map("uploads")
+}
+
+model DomainEvent {
+  id             BigInt   @id @default(autoincrement())
+  eventId        String   @unique @map("event_id") @db.VarChar(80)
+  conversationId String   @map("conversation_id") @db.Uuid
+  taskId         String?  @map("task_id") @db.Uuid
+  type           String   @db.VarChar(100)
+  data           Json
+  createdAt      DateTime @default(now()) @map("created_at")
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  task           Task?    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, id])
+  @@map("domain_events")
+}
+
+model ConsentRecord {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  revisionId  String   @unique @map("revision_id") @db.Uuid
+  textVersion String   @map("text_version") @db.VarChar(40)
+  acceptedAt  DateTime @map("accepted_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  candidate   ModelCaseCandidate?
+  user        User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@map("consent_records")
+}
+
+model ModelCaseCandidate {
+  id               String          @id @default(uuid()) @db.Uuid
+  sourceRevisionId String          @unique @map("source_revision_id") @db.Uuid
+  sourceUserId     String          @map("source_user_id") @db.Uuid
+  status           CandidateStatus @default(PRECHECKING)
+  metadata         Json
+  consentRecordId  String          @unique @map("consent_record_id") @db.Uuid
+  precheckResult   Json?           @map("precheck_result")
+  version          Int             @default(1)
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+  sourceRevision   ModelRevision   @relation(fields: [sourceRevisionId], references: [id], onDelete: Restrict)
+  consentRecord    ConsentRecord   @relation(fields: [consentRecordId], references: [id], onDelete: Restrict)
+  sourceUser       User            @relation(fields: [sourceUserId], references: [id], onDelete: Restrict)
+  cases            ModelCase[]
+  reviews          ModelCaseReview[]
+
+  @@index([status, createdAt])
+  @@map("model_case_candidates")
+}
+
+model ModelCase {
+  id               String     @id @default(uuid()) @db.Uuid
+  familyId         String     @map("family_id") @db.Uuid
+  version          Int
+  candidateId      String     @unique @map("candidate_id") @db.Uuid
+  title            String     @db.VarChar(160)
+  description      String
+  tags             Json
+  dimensions       Json
+  geometrySummary  Json       @map("geometry_summary")
+  compatibility    Json
+  status           CaseStatus @default(PUBLISHED)
+  publishedAt      DateTime?  @map("published_at")
+  unpublishedAt    DateTime?  @map("unpublished_at")
+  createdAt        DateTime   @default(now()) @map("created_at")
+  candidate        ModelCaseCandidate @relation(fields: [candidateId], references: [id], onDelete: Restrict)
+  artifacts        ModelCaseArtifact[]
+
+  @@unique([familyId, version])
+  @@index([status, publishedAt])
+  @@map("model_cases")
+}
+
+model ModelCaseArtifact {
+  id          String   @id @default(uuid()) @db.Uuid
+  caseId      String   @map("case_id") @db.Uuid
+  caseVersion Int      @map("case_version")
+  type        String   @db.VarChar(80)
+  objectKey   String   @unique @map("object_key")
+  filename    String   @db.VarChar(255)
+  checksum    String   @db.Char(64)
+  createdAt   DateTime @default(now()) @map("created_at")
+  modelCase   ModelCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId, caseVersion, type])
+  @@map("model_case_artifacts")
+}
+
+model ModelCaseReview {
+  id              String   @id @default(uuid()) @db.Uuid
+  candidateId     String   @map("candidate_id") @db.Uuid
+  reviewerId      String   @map("reviewer_id") @db.Uuid
+  decision        String   @db.VarChar(40)
+  notes           String?
+  metadataChanges Json     @default("{}") @map("metadata_changes")
+  createdAt       DateTime @default(now()) @map("created_at")
+  candidate       ModelCaseCandidate @relation(fields: [candidateId], references: [id], onDelete: Restrict)
+  reviewer        User     @relation(fields: [reviewerId], references: [id], onDelete: Restrict)
+
+  @@index([candidateId, createdAt])
+  @@map("model_case_reviews")
+}
+
+model ModelCaseRetrievalLog {
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          String   @map("user_id") @db.Uuid
+  conversationId  String   @map("conversation_id") @db.Uuid
+  taskId          String?  @map("task_id") @db.Uuid
+  query           String
+  returnedCaseIds Json     @map("returned_case_ids")
+  openedCaseIds   Json     @default("[]") @map("opened_case_ids")
+  createdAt       DateTime @default(now()) @map("created_at")
+  user            User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  task            Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@map("model_case_retrieval_logs")
+}
+
+model AuditLog {
+  id           BigInt   @id @default(autoincrement())
+  actorUserId  String?  @map("actor_user_id") @db.Uuid
+  action       String   @db.VarChar(120)
+  resourceType String   @map("resource_type") @db.VarChar(80)
+  resourceId   String?  @map("resource_id") @db.VarChar(160)
+  traceId      String   @map("trace_id") @db.VarChar(80)
+  details      Json     @default("{}")
+  createdAt    DateTime @default(now()) @map("created_at")
+  actor        User?    @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([actorUserId, createdAt])
+  @@index([resourceType, resourceId, createdAt])
+  @@map("audit_logs")
+}

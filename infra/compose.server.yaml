@@ -1,0 +1,48 @@
+services:
+  api:
+    ports: !reset []
+    deploy:
+      resources:
+        limits:
+          cpus: '${API_CPU_LIMIT:-2.0}'
+          memory: ${API_MEMORY_LIMIT:-2G}
+        reservations:
+          cpus: '${API_CPU_RESERVATION:-0.25}'
+          memory: ${API_MEMORY_RESERVATION:-256M}
+
+  web:
+    ports: !reset []
+    networks:
+      - backend
+      - edge
+    deploy:
+      resources:
+        limits:
+          cpus: '${WEB_CPU_LIMIT:-1.0}'
+          memory: ${WEB_MEMORY_LIMIT:-512M}
+
+  postgres:
+    deploy:
+      resources:
+        limits:
+          cpus: '${POSTGRES_CPU_LIMIT:-2.0}'
+          memory: ${POSTGRES_MEMORY_LIMIT:-2G}
+
+  redis:
+    deploy:
+      resources:
+        limits:
+          cpus: '${REDIS_CPU_LIMIT:-1.0}'
+          memory: ${REDIS_MEMORY_LIMIT:-1G}
+
+  minio:
+    deploy:
+      resources:
+        limits:
+          cpus: '${MINIO_CPU_LIMIT:-2.0}'
+          memory: ${MINIO_MEMORY_LIMIT:-2G}
+
+networks:
+  edge:
+    external: true
+    name: ${EDGE_NETWORK:-cadir-edge}
