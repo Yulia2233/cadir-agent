@@ -7,19 +7,19 @@ from fastapi import FastAPI, Response, status
 
 from cadir_runner import __version__
 from cadir_runner.contracts import (
-    ExecuteRequest,
-    ExecutionResult,
     DeriveRequest,
     DeriveResponse,
+    ExecuteRequest,
+    ExecutionResult,
     InspectRequest,
     InspectResponse,
     SkillDocumentRequest,
     SkillDocumentResponse,
 )
+from cadir_runner.derive import derive_model_artifacts
 from cadir_runner.executor import execute_model
 from cadir_runner.security import CodePolicyError
 from cadir_runner.tools import inspect_geometry, load_skill_document
-from cadir_runner.derive import derive_model_artifacts
 
 app = FastAPI(title="CADIR Runner", version=__version__, docs_url=None, redoc_url=None)
 WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT", "/data/workspaces"))
