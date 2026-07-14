@@ -7,10 +7,10 @@ const disconnect = vi.fn(() => undefined);
 const on = vi.fn(() => undefined);
 
 const RedisMock = class RedisMock {
-    connect = connect;
-    disconnect = disconnect;
-    on = on;
-  };
+  connect = connect;
+  disconnect = disconnect;
+  on = on;
+};
 
 vi.mock('ioredis', () => ({ default: RedisMock, Redis: RedisMock }));
 
