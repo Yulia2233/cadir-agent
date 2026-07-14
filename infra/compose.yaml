@@ -182,6 +182,22 @@ services:
       - backend
     stop_grace_period: 15s
 
+  freecad-worker:
+    <<: *service-defaults
+    build:
+      context: ..
+      dockerfile: workers/freecad/Dockerfile
+    image: cadir-freecad-worker:${CADIR_VERSION:-dev}
+    read_only: true
+    user: '10003:10003'
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    pids_limit: 64
+    mem_limit: 4g
+    cpus: 2.0
+    networks:
+      - runner-control
+
 networks:
   backend:
     internal: true
