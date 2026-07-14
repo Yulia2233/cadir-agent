@@ -1,8 +1,12 @@
-import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createWorkspace, WORKSPACE_DIRECTORIES } from '../src/services/workspaces.js';
+import {
+  createWorkspace,
+  freezeWorkingCopy,
+  WORKSPACE_DIRECTORIES,
+} from '../src/services/workspaces.js';
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -28,5 +32,20 @@ describe('workspace manager', () => {
     const root = await mkdtemp(path.join(tmpdir(), 'cadir-workspace-'));
     roots.push(root);
     await expect(createWorkspace(root, '../outside')).rejects.toThrow(/Workspace ID/);
+  });
+
+  it('freezes an immutable snapshot without removing the working evidence', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'cadir-workspace-'));
+    roots.push(root);
+    const id = '11111111-1111-4111-8111-111111111111';
+    const taskId = '22222222-2222-4222-8222-222222222222';
+    const workspace = await createWorkspace(root, id);
+    const model = path.join(workspace, 'working', taskId, 'Model');
+    await mkdir(model, { recursive: true });
+    await writeFile(path.join(model, 'model.py'), 'print(1)');
+
+    const frozen = await freezeWorkingCopy(root, id, taskId, 1);
+    await expect(stat(path.join(model, 'model.py'))).resolves.toBeDefined();
+    expect((await stat(path.join(frozen, 'model.py'))).mode & 0o222).toBe(0);
   });
 });

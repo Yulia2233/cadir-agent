@@ -9,6 +9,7 @@ import { publishDomainEvent } from './events.js';
 import { ConversationTaskLock } from './task-lock.js';
 import { transitionTask } from './task-state.js';
 import type { ObjectStore } from './object-store.js';
+import { freezeWorkingCopy } from './workspaces.js';
 
 type WorkerContext = {
   prisma: PrismaClient;
@@ -419,6 +420,12 @@ export class TaskWorker {
           });
         }
       });
+      await freezeWorkingCopy(
+        this.context.workspaceRoot,
+        input.workspaceId,
+        input.taskId,
+        revisionNumber,
+      );
       return revisionId;
     } catch (error: unknown) {
       await Promise.allSettled(

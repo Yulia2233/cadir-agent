@@ -1,4 +1,4 @@
-import { chmod, mkdir, open, realpath, rename, rm } from 'node:fs/promises';
+import { chmod, cp, lstat, mkdir, open, readdir, realpath, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { AppError } from '../lib/errors.js';
 
@@ -70,10 +70,32 @@ export async function freezeWorkingCopy(
     throw new AppError(400, 'INVALID_WORKING_COPY', 'Working copy is outside the workspace');
   }
   await mkdir(path.dirname(destination), { recursive: true, mode: 0o2770 });
-  await rename(resolvedSource, destination);
+  await cp(resolvedSource, destination, { recursive: true, force: false, errorOnExist: true });
+  await makeTreeReadOnly(destination);
 
   // A sentinel opened exclusively prevents a revision from being frozen twice.
   const sentinel = await open(path.join(path.dirname(destination), '.immutable'), 'wx', 0o440);
   await sentinel.close();
   return destination;
+}
+
+async function makeTreeReadOnly(directory: string): Promise<void> {
+  const entries = await readdir(directory, { withFileTypes: true });
+  for (const entry of entries) {
+    const item = path.join(directory, entry.name);
+    if (entry.isSymbolicLink()) {
+      throw new AppError(400, 'INVALID_WORKING_COPY', 'Working copy contains a symbolic link');
+    }
+    if (entry.isDirectory()) {
+      await makeTreeReadOnly(item);
+      await chmod(item, 0o550);
+    } else {
+      const linkCount = (await lstat(item)).nlink;
+      if (linkCount > 1) {
+        throw new AppError(400, 'INVALID_WORKING_COPY', 'Working copy contains a hard link');
+      }
+      await chmod(item, 0o440);
+    }
+  }
+  await chmod(directory, 0o550);
 }
