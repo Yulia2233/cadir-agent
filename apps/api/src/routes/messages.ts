@@ -1,9 +1,12 @@
+import crypto from 'node:crypto';
 import type { FastifyPluginAsync } from 'fastify';
 import { TaskMode, TaskPhase, TaskStatus } from '@prisma/client';
 import { z } from 'zod';
 import { classifyDomainRequest } from '../domain/domain-guard.js';
+import { extractRequirementSnapshot } from '../domain/requirement-snapshot.js';
 import { AppError, notFound } from '../lib/errors.js';
 import { publishDomainEvent } from '../services/events.js';
+import { ConversationTaskLock } from '../services/task-lock.js';
 
 const idSchema = z.object({ id: z.string().uuid() });
 const listSchema = z.object({
@@ -102,74 +105,93 @@ export const messageRoutes: FastifyPluginAsync = async (app) => {
         });
         if (ownedSelections !== input.selections.length) throw notFound();
       }
+      if (input.attachments.length > 0) {
+        const ownedAttachments = await app.prisma.upload.count({
+          where: { id: { in: input.attachments }, conversationId: id, status: 'READY' },
+        });
+        if (ownedAttachments !== input.attachments.length) throw notFound();
+      }
 
       const guard = classifyDomainRequest(input.content, conversation.currentRevisionId !== null);
-      const result = await app.prisma.$transaction(async (tx) => {
-        const task = await tx.task.create({
-          data: {
-            conversationId: id,
-            userId: request.authUser.id,
-            workspaceId: workspace.id,
-            status: guard.allowed ? TaskStatus.QUEUED : TaskStatus.COMPLETED,
-            currentPhase: guard.allowed ? TaskPhase.DOMAIN_GUARD : TaskPhase.REJECTED,
-            mode: input.mode,
-            freecadRequested: input.freecadRequested,
-            requirementSnapshot: {
-              version: 1,
-              parentRevisionId: input.parentRevisionId,
-              selectionIds: input.selections,
-              attachmentIds: input.attachments,
+      const taskId = crypto.randomUUID();
+      const lock = new ConversationTaskLock(app.redis);
+      if (guard.allowed && !(await lock.acquire(id, taskId))) {
+        throw new AppError(409, 'CONVERSATION_BUSY', 'This conversation already has a write task');
+      }
+      const result = await app.prisma
+        .$transaction(async (tx) => {
+          const task = await tx.task.create({
+            data: {
+              id: taskId,
+              conversationId: id,
+              userId: request.authUser.id,
+              workspaceId: workspace.id,
+              status: guard.allowed ? TaskStatus.QUEUED : TaskStatus.COMPLETED,
+              currentPhase: guard.allowed ? TaskPhase.DOMAIN_GUARD : TaskPhase.REJECTED,
+              mode: input.mode,
+              freecadRequested: input.freecadRequested,
+              requirementSnapshot: extractRequirementSnapshot({
+                content: input.content,
+                freecadRequested: input.freecadRequested,
+                parentRevisionId: input.parentRevisionId ?? null,
+                selectionIds: input.selections,
+                attachmentIds: input.attachments,
+              }),
             },
-          },
-        });
-        const message = await tx.message.create({
-          data: {
-            conversationId: id,
-            userId: request.authUser.id,
-            taskId: task.id,
-            role: 'USER',
-            content: input.content,
-            structuredParts: {
-              selections: input.selections,
-              attachments: input.attachments,
-            },
-            idempotencyKey,
-          },
-        });
-        await publishDomainEvent(tx, {
-          conversationId: id,
-          taskId: task.id,
-          type: 'task.created',
-          data: { taskId: task.id, mode: task.mode },
-        });
-
-        if (!guard.allowed) {
-          const agentMessage = await tx.message.create({
+          });
+          const message = await tx.message.create({
             data: {
               conversationId: id,
+              userId: request.authUser.id,
               taskId: task.id,
-              role: 'AGENT',
-              content:
-                guard.category === 'unsafe_intent'
-                  ? 'I can only use the restricted CAD modeling tools and cannot perform that action.'
-                  : 'I can help with CAD modeling, CAD file analysis, and changes to the current model.',
+              role: 'USER',
+              content: input.content,
+              structuredParts: {
+                selections: input.selections,
+                attachments: input.attachments,
+              },
+              idempotencyKey,
             },
           });
           await publishDomainEvent(tx, {
             conversationId: id,
             taskId: task.id,
-            type: 'agent.message.completed',
-            data: { messageId: agentMessage.id },
+            type: 'task.created',
+            data: { taskId: task.id, mode: task.mode },
           });
-          await publishDomainEvent(tx, {
-            conversationId: id,
-            taskId: task.id,
-            type: 'task.completed',
-            data: { phase: TaskPhase.REJECTED },
-          });
-        }
-        return { message, task, guard };
-      });
+
+          if (!guard.allowed) {
+            const agentMessage = await tx.message.create({
+              data: {
+                conversationId: id,
+                taskId: task.id,
+                role: 'AGENT',
+                content:
+                  guard.category === 'unsafe_intent'
+                    ? 'I can only use the restricted CAD modeling tools and cannot perform that action.'
+                    : 'I can help with CAD modeling, CAD file analysis, and changes to the current model.',
+              },
+            });
+            await publishDomainEvent(tx, {
+              conversationId: id,
+              taskId: task.id,
+              type: 'agent.message.completed',
+              data: { messageId: agentMessage.id },
+            });
+            await publishDomainEvent(tx, {
+              conversationId: id,
+              taskId: task.id,
+              type: 'task.completed',
+              data: { phase: TaskPhase.REJECTED },
+            });
+          }
+          return { message, task, guard };
+        })
+        .catch(async (error: unknown) => {
+          if (guard.allowed) await lock.release(id, taskId);
+          throw error;
+        });
+      if (guard.allowed) await app.redis.lpush('queue:cadir:tasks', result.task.id);
       return reply.status(guard.allowed ? 202 : 200).send(result);
     },
   );
