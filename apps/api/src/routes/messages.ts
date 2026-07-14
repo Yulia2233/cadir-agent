@@ -82,10 +82,77 @@ export const messageRoutes: FastifyPluginAsync = async (app) => {
         return reply.status(200).send({ message: existingMessage, task: existingMessage.task });
       }
 
+      const waitingTask = await app.prisma.task.findFirst({
+        where: { conversationId: id, status: TaskStatus.WAITING_USER },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (waitingTask !== null) {
+        const resumeLock = new ConversationTaskLock(app.redis);
+        if (!(await resumeLock.acquire(id, waitingTask.id))) {
+          throw new AppError(
+            409,
+            'CONVERSATION_BUSY',
+            'This conversation already has a write task',
+          );
+        }
+        const previousMessages = await app.prisma.message.findMany({
+          where: { taskId: waitingTask.id, role: 'USER' },
+          orderBy: { createdAt: 'asc' },
+          select: { content: true },
+        });
+        const snapshot = extractRequirementSnapshot({
+          content: [...previousMessages.map((message) => message.content), input.content].join(
+            '\n',
+          ),
+          freecadRequested: input.freecadRequested || waitingTask.freecadRequested,
+          parentRevisionId: input.parentRevisionId ?? null,
+          selectionIds: input.selections,
+          attachmentIds: input.attachments,
+          previous: waitingTask.requirementSnapshot,
+        });
+        const message = await app.prisma
+          .$transaction(async (tx) => {
+            const created = await tx.message.create({
+              data: {
+                conversationId: id,
+                userId: request.authUser.id,
+                taskId: waitingTask.id,
+                role: 'USER',
+                content: input.content,
+                structuredParts: { selections: input.selections, attachments: input.attachments },
+                idempotencyKey,
+              },
+            });
+            await tx.task.update({
+              where: { id: waitingTask.id },
+              data: {
+                status: TaskStatus.QUEUED,
+                currentPhase: TaskPhase.DOMAIN_GUARD,
+                requirementSnapshot: snapshot,
+              },
+            });
+            await publishDomainEvent(tx, {
+              conversationId: id,
+              taskId: waitingTask.id,
+              type: 'task.phase.changed',
+              data: { phase: TaskPhase.ANALYZE, label: 'Analyzing requirements', progress: null },
+            });
+            return created;
+          })
+          .catch(async (error: unknown) => {
+            await resumeLock.release(id, waitingTask.id);
+            throw error;
+          });
+        await app.redis.lpush('queue:cadir:tasks', waitingTask.id);
+        return reply
+          .status(202)
+          .send({ message, task: { ...waitingTask, requirementSnapshot: snapshot } });
+      }
+
       const activeTask = await app.prisma.task.findFirst({
         where: {
           conversationId: id,
-          status: { in: [TaskStatus.QUEUED, TaskStatus.RUNNING, TaskStatus.WAITING_USER] },
+          status: { in: [TaskStatus.QUEUED, TaskStatus.RUNNING] },
         },
         select: { id: true },
       });
