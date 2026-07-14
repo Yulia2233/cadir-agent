@@ -49,7 +49,7 @@ def _workspace_model_json(workspace_root: Path, requested_workspace: str) -> Pat
 
 
 def inspect_geometry(workspace_root: Path, request: InspectRequest) -> InspectResponse:
-    from simplecadapi import list_tags, replay_model_json
+    from simplecadapi import list_tags, replay_model_json  # type: ignore[import-not-found]
 
     payload = _workspace_model_json(workspace_root, request.workspace_path).read_text(
         encoding="utf-8"
