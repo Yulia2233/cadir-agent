@@ -148,8 +148,11 @@ export class TaskWorker {
       await this.move(task.id, task.conversationId, TaskPhase.EXECUTE, TaskPhase.VALIDATE);
       await this.validateModel(task.workspaceId, task.id, snapshot);
       await this.move(task.id, task.conversationId, TaskPhase.VALIDATE, TaskPhase.VISUAL_REVIEW);
+      const revisionId = randomUUID();
+      await this.deriveArtifacts(task.workspaceId, task.conversationId, task.id, revisionId);
       await this.move(task.id, task.conversationId, TaskPhase.VISUAL_REVIEW, TaskPhase.PUBLISH);
-      const revisionId = await this.publishRevision({
+      await this.publishRevision({
+        revisionId,
         taskId: task.id,
         conversationId: task.conversationId,
         workspaceId: task.workspaceId,
@@ -378,6 +381,7 @@ export class TaskWorker {
   }
 
   private async publishRevision(input: {
+    revisionId: string;
     taskId: string;
     conversationId: string;
     workspaceId: string;
@@ -396,6 +400,17 @@ export class TaskWorker {
       ['STEP', 'model.step', 'model/step'],
       ['STL', 'model.stl', 'model/stl'],
       ['VALIDATION', 'validation.json', 'application/json'],
+      ['PREVIEW_ISO', 'previews/iso.png', 'image/png'],
+      ['PREVIEW_FRONT', 'previews/front.png', 'image/png'],
+      ['PREVIEW_BACK', 'previews/back.png', 'image/png'],
+      ['PREVIEW_LEFT', 'previews/left.png', 'image/png'],
+      ['PREVIEW_RIGHT', 'previews/right.png', 'image/png'],
+      ['PREVIEW_TOP', 'previews/top.png', 'image/png'],
+      ['PREVIEW_BOTTOM', 'previews/bottom.png', 'image/png'],
+      ['GLB', 'viewer/model.glb', 'model/gltf-binary'],
+      ['TOPOLOGY_MAP', 'viewer/topology-map.json', 'application/json'],
+      ['BREP_EDGES', 'viewer/edges.bin', 'application/octet-stream'],
+      ['BREP', 'viewer/model.brep', 'application/octet-stream'],
     ] as const;
     const files = await Promise.all(
       artifactDefinitions.map(async ([type, filename, contentType]) => ({
@@ -411,7 +426,7 @@ export class TaskWorker {
       select: { revisionNumber: true },
     });
     const revisionNumber = (current?.revisionNumber ?? 0) + 1;
-    const revisionId = randomUUID();
+    const revisionId = input.revisionId;
     const stored = await Promise.all(
       files.map(async (file) => {
         const key = `revisions/${input.conversationId}/${revisionId}/${file.filename}`;
@@ -481,6 +496,61 @@ export class TaskWorker {
         stored.map(({ object }) => this.context.objectStore.delete(object.key)),
       );
       throw error;
+    }
+  }
+
+  private async deriveArtifacts(
+    workspaceId: string,
+    conversationId: string,
+    taskId: string,
+    revisionId: string,
+  ): Promise<void> {
+    const workspacePath = path.join(this.context.workspaceRoot, workspaceId, 'working', taskId);
+    await publishDomainEvent(this.context.prisma, {
+      conversationId,
+      taskId,
+      type: 'model.render.started',
+      data: { views: ['iso', 'front', 'back', 'left', 'right', 'top', 'bottom'] },
+    });
+    const response = await fetch(new URL('/internal/derive', this.context.runnerUrl), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        workspace_path: workspacePath,
+        revision_id: revisionId,
+        image_width: 960,
+        image_height: 720,
+      }),
+      signal: AbortSignal.timeout(180_000),
+    });
+    if (!response.ok) throw new Error('Model preview and topology derivation failed');
+    const result = (await response.json()) as {
+      generated?: string[];
+      face_count?: number;
+      edge_count?: number;
+      triangle_count?: number;
+    };
+    const expected = new Set([
+      'previews/iso.png',
+      'previews/front.png',
+      'previews/back.png',
+      'previews/left.png',
+      'previews/right.png',
+      'previews/top.png',
+      'previews/bottom.png',
+      'viewer/model.glb',
+      'viewer/topology-map.json',
+      'viewer/edges.bin',
+      'viewer/model.brep',
+    ]);
+    for (const generated of result.generated ?? []) expected.delete(generated);
+    if (
+      expected.size > 0 ||
+      (result.face_count ?? 0) <= 0 ||
+      (result.edge_count ?? 0) <= 0 ||
+      (result.triangle_count ?? 0) <= 0
+    ) {
+      throw new Error('Derived artifact set is incomplete');
     }
   }
 

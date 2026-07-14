@@ -55,3 +55,21 @@ class InspectResponse(BaseModel):
     entity: Literal["solid", "face", "edge"]
     index: int | None
     facts: dict[str, Any]
+
+
+class DeriveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_path: str
+    revision_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
+    image_width: int = Field(default=960, ge=320, le=2048)
+    image_height: int = Field(default=720, ge=240, le=2048)
+
+
+class DeriveResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    generated: list[str]
+    face_count: int
+    edge_count: int
+    triangle_count: int

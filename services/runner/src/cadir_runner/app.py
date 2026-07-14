@@ -9,6 +9,8 @@ from cadir_runner import __version__
 from cadir_runner.contracts import (
     ExecuteRequest,
     ExecutionResult,
+    DeriveRequest,
+    DeriveResponse,
     InspectRequest,
     InspectResponse,
     SkillDocumentRequest,
@@ -17,6 +19,7 @@ from cadir_runner.contracts import (
 from cadir_runner.executor import execute_model
 from cadir_runner.security import CodePolicyError
 from cadir_runner.tools import inspect_geometry, load_skill_document
+from cadir_runner.derive import derive_model_artifacts
 
 app = FastAPI(title="CADIR Runner", version=__version__, docs_url=None, redoc_url=None)
 WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT", "/data/workspaces"))
@@ -103,6 +106,16 @@ async def skill_document(request: SkillDocumentRequest) -> SkillDocumentResponse
 async def inspect(request: InspectRequest) -> InspectResponse:
     try:
         return inspect_geometry(WORKSPACE_ROOT, request)
+    except (CodePolicyError, OSError, UnicodeError, ValueError) as error:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@app.post("/internal/derive", response_model=DeriveResponse)
+async def derive(request: DeriveRequest) -> DeriveResponse:
+    try:
+        return derive_model_artifacts(WORKSPACE_ROOT, request)
     except (CodePolicyError, OSError, UnicodeError, ValueError) as error:
         from fastapi import HTTPException
 
