@@ -49,7 +49,7 @@ def _workspace_model_json(workspace_root: Path, requested_workspace: str) -> Pat
 
 
 def inspect_geometry(workspace_root: Path, request: InspectRequest) -> InspectResponse:
-    from simplecadapi import list_tags, replay_model_json  # type: ignore[import-not-found]
+    from simplecadapi import list_tags, replay_model_json
 
     payload = _workspace_model_json(workspace_root, request.workspace_path).read_text(
         encoding="utf-8"
@@ -79,6 +79,9 @@ def inspect_geometry(workspace_root: Path, request: InspectRequest) -> InspectRe
         elif field == "normal" and request.entity == "face":
             normal = entity.get_normal_at()
             facts[field] = [normal.x, normal.y, normal.z]
+        elif field == "center" and request.entity in {"face", "edge"}:
+            center = entity.get_center()
+            facts[field] = [center.x, center.y, center.z]
         elif field == "tags":
             facts[field] = list_tags(entity)
         elif field == "count" and request.entity == "solid":

@@ -44,8 +44,8 @@ def test_inspection_contract_round_trips_structured_fields() -> None:
                 "workspace_path": "workspace",
                 "entity": "face",
                 "index": 0,
-                "fields": ["area", "normal", "tags"],
+                "fields": ["area", "normal", "center", "tags"],
             }
         )
     )
-    assert request.fields == ["area", "normal", "tags"]
+    assert request.fields == ["area", "normal", "center", "tags"]
