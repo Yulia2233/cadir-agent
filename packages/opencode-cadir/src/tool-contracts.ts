@@ -30,7 +30,7 @@ export const cadToolInputSchemas = {
     entity: z.enum(['solid', 'face', 'edge']),
     index: z.number().int().nonnegative().optional(),
     fields: z
-      .array(z.enum(['volume', 'area', 'length', 'normal', 'center', 'tags', 'count']))
+      .array(z.enum(['volume', 'bounds', 'area', 'length', 'normal', 'center', 'tags', 'count']))
       .min(1)
       .max(10),
   }),

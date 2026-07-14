@@ -72,6 +72,13 @@ def inspect_geometry(workspace_root: Path, request: InspectRequest) -> InspectRe
     for field in request.fields:
         if field == "volume" and request.entity == "solid":
             facts[field] = entity.get_volume()
+        elif field == "bounds" and request.entity == "solid":
+            from OCP.Bnd import Bnd_Box  # type: ignore[import-untyped]
+            from OCP.BRepBndLib import BRepBndLib  # type: ignore[import-untyped]
+
+            bounds = Bnd_Box()
+            BRepBndLib.Add_s(entity.wrapped, bounds)
+            facts[field] = list(bounds.Get())
         elif field == "area" and request.entity == "face":
             facts[field] = entity.get_area()
         elif field == "length" and request.entity == "edge":

@@ -45,7 +45,7 @@ class InspectRequest(BaseModel):
     entity: Literal["solid", "face", "edge"]
     index: int | None = Field(default=None, ge=0)
     fields: list[
-        Literal["volume", "area", "length", "normal", "center", "tags", "count"]
+        Literal["volume", "bounds", "area", "length", "normal", "center", "tags", "count"]
     ] = Field(min_length=1, max_length=10)
 
 

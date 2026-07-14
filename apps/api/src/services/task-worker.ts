@@ -146,7 +146,7 @@ export class TaskWorker {
         throw new Error(`Model execution ${execution.status}: ${execution.stderr.slice(0, 500)}`);
       }
       await this.move(task.id, task.conversationId, TaskPhase.EXECUTE, TaskPhase.VALIDATE);
-      await this.validateModel(task.workspaceId, task.id);
+      await this.validateModel(task.workspaceId, task.id, snapshot);
       await this.move(task.id, task.conversationId, TaskPhase.VALIDATE, TaskPhase.VISUAL_REVIEW);
       await this.move(task.id, task.conversationId, TaskPhase.VISUAL_REVIEW, TaskPhase.PUBLISH);
       const revisionId = await this.publishRevision({
@@ -294,7 +294,11 @@ export class TaskWorker {
     return modelPath;
   }
 
-  private async validateModel(workspaceId: string, taskId: string): Promise<void> {
+  private async validateModel(
+    workspaceId: string,
+    taskId: string,
+    snapshot: ReturnType<typeof requirementSnapshotSchema.parse>,
+  ): Promise<void> {
     const workspacePath = path.join(this.context.workspaceRoot, workspaceId, 'working', taskId);
     const response = await fetch(new URL('/internal/inspect', this.context.runnerUrl), {
       method: 'POST',
@@ -302,14 +306,41 @@ export class TaskWorker {
       body: JSON.stringify({
         workspace_path: workspacePath,
         entity: 'solid',
-        fields: ['volume', 'count', 'tags'],
+        fields: ['volume', 'bounds', 'count', 'tags'],
       }),
       signal: AbortSignal.timeout(30_000),
     });
     if (!response.ok) throw new Error('Strict model inspection failed');
-    const facts = (await response.json()) as { facts: Record<string, unknown> };
+    const facts = (await response.json()) as {
+      facts: {
+        volume?: number;
+        bounds?: number[];
+        count?: { solids?: number; faces?: number; edges?: number };
+      };
+    };
+    const expectedBounds = [
+      snapshot.dimensions.length ?? null,
+      snapshot.dimensions.width ?? null,
+      snapshot.dimensions.thickness ?? null,
+    ];
+    const actualBounds =
+      facts.facts.bounds?.length === 6
+        ? [
+            facts.facts.bounds[3]! - facts.facts.bounds[0]!,
+            facts.facts.bounds[4]! - facts.facts.bounds[1]!,
+            facts.facts.bounds[5]! - facts.facts.bounds[2]!,
+          ]
+        : null;
+    const tolerance = 1e-5;
+    const boundsPassed =
+      actualBounds !== null &&
+      expectedBounds.every(
+        (expected, index) =>
+          expected === null || Math.abs(expected - actualBounds[index]!) <= tolerance,
+      );
+    const solidCountPassed = facts.facts.count?.solids === snapshot.solidCount;
     const validation = {
-      passed: true,
+      passed: boundsPassed && solidCountPassed && (facts.facts.volume ?? 0) > 0,
       checks: [
         {
           name: 'strict_replay',
@@ -319,8 +350,26 @@ export class TaskWorker {
           tolerance: 1e-6,
           evidence: 'Runner strict replay and geometry inspection',
         },
+        {
+          name: 'bounding_box',
+          passed: boundsPassed,
+          expected: expectedBounds,
+          actual: actualBounds,
+          tolerance,
+          evidence: 'OCP BRep bounding box from strict replay result',
+        },
+        {
+          name: 'solid_count',
+          passed: solidCountPassed,
+          expected: snapshot.solidCount,
+          actual: facts.facts.count?.solids ?? null,
+          tolerance: 0,
+          evidence: 'Strict replay solid cardinality',
+        },
       ],
     };
+    if (!validation.passed)
+      throw new Error('Model geometry did not satisfy the requirement snapshot');
     await writeFile(
       path.join(workspacePath, 'Model', 'validation.json'),
       JSON.stringify(validation, null, 2),
