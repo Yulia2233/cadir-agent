@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -21,3 +21,37 @@ class ExecutionResult(BaseModel):
     stderr: str
     duration_ms: int
     output_truncated: bool = False
+
+
+class SkillDocumentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    document: str = Field(min_length=1, max_length=255)
+
+
+class SkillDocumentResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    document: str
+    content: str
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    version: str
+
+
+class InspectRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_path: str
+    entity: Literal["solid", "face", "edge"]
+    index: int | None = Field(default=None, ge=0)
+    fields: list[Literal["volume", "area", "length", "normal", "tags", "count"]] = Field(
+        min_length=1, max_length=10
+    )
+
+
+class InspectResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    entity: Literal["solid", "face", "edge"]
+    index: int | None
+    facts: dict[str, Any]

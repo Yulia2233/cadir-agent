@@ -6,8 +6,17 @@ import yaml
 from fastapi import FastAPI, Response, status
 
 from cadir_runner import __version__
-from cadir_runner.contracts import ExecuteRequest, ExecutionResult
+from cadir_runner.contracts import (
+    ExecuteRequest,
+    ExecutionResult,
+    InspectRequest,
+    InspectResponse,
+    SkillDocumentRequest,
+    SkillDocumentResponse,
+)
 from cadir_runner.executor import execute_model
+from cadir_runner.security import CodePolicyError
+from cadir_runner.tools import inspect_geometry, load_skill_document
 
 app = FastAPI(title="CADIR Runner", version=__version__, docs_url=None, redoc_url=None)
 WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT", "/data/workspaces"))
@@ -78,3 +87,23 @@ async def execute(request: ExecuteRequest) -> ExecutionResult:
         request.timeout_seconds,
         request.max_output_bytes,
     )
+
+
+@app.post("/internal/skill/document", response_model=SkillDocumentResponse)
+async def skill_document(request: SkillDocumentRequest) -> SkillDocumentResponse:
+    try:
+        return load_skill_document(SKILL_ROOT, request.document, installed_skill_version())
+    except (CodePolicyError, OSError, UnicodeError) as error:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@app.post("/internal/inspect", response_model=InspectResponse)
+async def inspect(request: InspectRequest) -> InspectResponse:
+    try:
+        return inspect_geometry(WORKSPACE_ROOT, request)
+    except (CodePolicyError, OSError, UnicodeError, ValueError) as error:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=400, detail=str(error)) from error
