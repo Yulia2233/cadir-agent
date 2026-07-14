@@ -16,6 +16,8 @@ import { healthRoutes } from './routes/health.js';
 import { eventRoutes } from './routes/events.js';
 import { messageRoutes } from './routes/messages.js';
 import { modelConfigRoutes } from './routes/model-configs.js';
+import { uploadRoutes } from './routes/uploads.js';
+import { revisionRoutes } from './routes/revisions.js';
 
 export async function buildApp(config: AppConfig = loadConfig()): Promise<FastifyInstance> {
   const app = Fastify({
@@ -57,6 +59,8 @@ export async function buildApp(config: AppConfig = loadConfig()): Promise<Fastif
   await app.register(healthRoutes);
   await app.register(authRoutes);
   await app.register(modelConfigRoutes);
+  await app.register(uploadRoutes);
+  await app.register(revisionRoutes);
   await app.register(conversationRoutes);
   await app.register(messageRoutes);
   await app.register(eventRoutes);
