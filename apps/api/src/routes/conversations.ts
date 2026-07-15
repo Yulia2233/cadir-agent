@@ -3,6 +3,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { notFound } from '../lib/errors.js';
 import { createWorkspace, removeWorkspace } from '../services/workspaces.js';
+import { cleanupConversationResources } from '../services/conversation-cleanup.js';
 
 const querySchema = z.object({
   cursor: z.string().datetime().optional(),
@@ -144,6 +145,14 @@ export const conversationRoutes: FastifyPluginAsync = async (app) => {
           );
         });
     }
+    await cleanupConversationResources({
+      prisma: app.prisma,
+      objectStore: app.objectStore,
+      workspaceRoot: app.config.WORKSPACE_ROOT,
+      conversationId: id,
+      workspaceId: existing.workspace?.id ?? null,
+      logger: request.log,
+    });
     return reply.status(204).send();
   });
 };
