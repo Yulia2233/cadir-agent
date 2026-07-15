@@ -133,7 +133,9 @@ describe('CAD workbench', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Provider settings' }));
     expect(screen.getByRole('dialog', { name: 'Model providers' })).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Enter API key')).toHaveAttribute('type', 'password');
-    expect(screen.getByPlaceholderText('https://api.example.com/v1')).toHaveValue('');
+    expect(screen.getByPlaceholderText('https://vip.auto-code.net/v1')).toHaveValue(
+      'https://vip.auto-code.net/v1',
+    );
     expect(screen.getByDisplayValue('5.6-sol')).toBeInTheDocument();
   });
 
@@ -147,6 +149,24 @@ describe('CAD workbench', () => {
       screen.getByText('Create a 60 x 40 x 4 mm mounting plate', { selector: '.message p' }),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
+  });
+
+  it('uploads selected references before sending their server-owned IDs', async () => {
+    await renderOfflineWorkbench();
+    const file = new File(['cad-reference'], 'reference.step', { type: 'application/step' });
+    const input = screen.getByLabelText('Attach image, document, STEP, or STL');
+    fireEvent.click(input);
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(fileInput, { target: { files: [file] } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'CAD request' }), {
+      target: { value: 'Modify the uploaded part' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const uploadCall = vi
+      .mocked(fetch)
+      .mock.calls.find(([url]) => String(url).includes('/uploads'));
+    expect(uploadCall?.[1]?.body).toBeInstanceOf(FormData);
   });
 
   it('re-enables the composer when a task waits for user input', () => {

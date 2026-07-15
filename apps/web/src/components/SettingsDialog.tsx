@@ -24,7 +24,8 @@ type ProviderDraft = {
 
 const emptyDraft: ProviderDraft = {
   provider: 'OpenAI compatible',
-  baseUrl: '',
+  // Keep the supplied OpenAI-compatible gateway ready for first-run setup.
+  baseUrl: 'https://vip.auto-code.net/v1',
   apiKey: '',
   // Match the stable model alias configured by the internal OpenCode agent.
   modelId: '5.6-sol',
@@ -213,7 +214,7 @@ export function SettingsDialog({
               Base URL
               <input
                 type="url"
-                placeholder="https://api.example.com/v1"
+                placeholder="https://vip.auto-code.net/v1"
                 value={draft.baseUrl}
                 onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })}
               />
