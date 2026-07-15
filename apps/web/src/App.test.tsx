@@ -152,6 +152,38 @@ describe('CAD workbench', () => {
   });
 
   it('uploads selected references before sending their server-owned IDs', async () => {
+    const serverConversation = {
+      id: '22e94590-ad4c-48f3-9da6-02c2c9cae1c2',
+      title: 'New CAD conversation',
+      status: 'IDLE',
+      updatedAt: new Date().toISOString(),
+      currentRevisionId: null,
+    };
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith('/api/me'))
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              user: { id: 'user', email: 'u@example.test', displayName: 'User', role: 'USER' },
+            }),
+            { status: 200 },
+          ),
+        );
+      if (url.includes('/api/conversations') && init?.method === 'POST')
+        return Promise.resolve(new Response(JSON.stringify(serverConversation), { status: 201 }));
+      if (url.includes('/api/conversations') && url.includes('/uploads'))
+        return Promise.resolve(new Response(JSON.stringify({ id: 'upload-id' }), { status: 201 }));
+      if (url.includes('/api/conversations'))
+        return Promise.resolve(
+          new Response(JSON.stringify({ items: [serverConversation], nextCursor: null }), {
+            status: 200,
+          }),
+        );
+      if (url.includes('/api/me/model-configs'))
+        return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+      return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
+    });
     await renderOfflineWorkbench();
     const file = new File(['cad-reference'], 'reference.step', { type: 'application/step' });
     const input = screen.getByLabelText('Attach image, document, STEP, or STL');

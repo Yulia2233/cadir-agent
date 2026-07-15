@@ -268,6 +268,17 @@ export function App() {
 
     if (offlineMode || active.id.startsWith('local-')) return;
     try {
+      const uploadedAttachmentIds = await Promise.all(
+        attachments.map(async (attachment) => {
+          const form = new FormData();
+          form.append('file', attachment.file, attachment.name);
+          const uploaded = await apiRequest<{ id: string }>(
+            `/api/conversations/${active.id}/uploads`,
+            { method: 'POST', body: form },
+          );
+          return uploaded.id;
+        }),
+      );
       await apiRequest(`/api/conversations/${active.id}/messages`, {
         method: 'POST',
         headers: { 'x-idempotency-key': crypto.randomUUID() },
@@ -276,7 +287,7 @@ export function App() {
           mode,
           freecadRequested: freecad,
           selections: selections.map((selection) => selection.id),
-          attachments: attachments.map((attachment) => attachment.id),
+          attachments: uploadedAttachmentIds,
         }),
       });
     } catch (caught) {

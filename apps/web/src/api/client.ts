@@ -34,7 +34,8 @@ export function currentCsrfToken(
 
 export async function apiRequest<T>(path: string, init: ApiRequestOptions = {}): Promise<T> {
   const headers = new Headers(init.headers);
-  if (init.body !== undefined && !headers.has('content-type')) {
+  // Let fetch set the multipart boundary for FormData uploads.
+  if (init.body !== undefined && !(init.body instanceof FormData) && !headers.has('content-type')) {
     headers.set('content-type', 'application/json');
   }
   csrfToken = currentCsrfToken(readCsrfCookie(), csrfToken);
