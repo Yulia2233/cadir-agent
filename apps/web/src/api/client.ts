@@ -25,12 +25,19 @@ export function setCsrfToken(value: string | null): void {
   else sessionStorage.setItem('cadir.csrf', value);
 }
 
+export function currentCsrfToken(
+  cookieValue: string | null,
+  cachedValue: string | null,
+): string | null {
+  return cookieValue ?? cachedValue;
+}
+
 export async function apiRequest<T>(path: string, init: ApiRequestOptions = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body !== undefined && !headers.has('content-type')) {
     headers.set('content-type', 'application/json');
   }
-  csrfToken ??= readCsrfCookie();
+  csrfToken = currentCsrfToken(readCsrfCookie(), csrfToken);
   if (csrfToken !== null && !['GET', 'HEAD'].includes(init.method ?? 'GET')) {
     headers.set('x-csrf-token', csrfToken);
   }

@@ -11,6 +11,10 @@ import {
 
 export const API_CONTRACT_VERSION = '1.0.0';
 
+export const providerModelsSchema = z
+  .object({ items: z.array(z.string().min(1).max(200)).max(500) })
+  .strict();
+
 export const apiErrorSchema = z
   .object({
     error: z.object({
@@ -276,6 +280,7 @@ export const restApiSchema = {
   authLogout: { method: 'POST', path: '/api/auth/logout' },
   me: { method: 'GET', path: '/api/me' },
   modelConfigs: { method: 'GET', path: '/api/me/model-configs' },
+  modelConfigModels: { method: 'GET', path: '/api/me/model-configs/:id/models' },
   conversations: { method: 'GET', path: '/api/conversations' },
   conversationCreate: { method: 'POST', path: '/api/conversations' },
   conversation: { method: 'GET', path: '/api/conversations/:id' },

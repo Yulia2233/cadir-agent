@@ -42,4 +42,39 @@ describe('requirement snapshots', () => {
     });
     expect(snapshot.conflicts).toContain('mixed_units_require_confirmation');
   });
+
+  it('extracts a Chinese flat four-hole flange and respects negated chamfering', () => {
+    const snapshot = extractRequirementSnapshot({
+      content:
+        '生成一个四孔法兰，不要做倒角，就一个平板。外径100毫米，厚度8毫米，中心孔直径30毫米，四个安装孔直径10毫米，孔中心均布在直径70毫米的分度圆上。',
+      freecadRequested: false,
+    });
+
+    expect(snapshot.partType).toBe('flange');
+    expect(snapshot.dimensions).toMatchObject({
+      outerDiameter: 100,
+      thickness: 8,
+      centerHoleDiameter: 30,
+      holeDiameter: 10,
+      pitchCircleDiameter: 70,
+    });
+    expect(snapshot.features).toContain('hole');
+    expect(snapshot.features).not.toContain('chamfer');
+    expect(snapshot.missing).toEqual([]);
+  });
+
+  it('removes a previously inferred feature when a supplement explicitly negates it', () => {
+    const previous = extractRequirementSnapshot({
+      content: '法兰外径100毫米厚8毫米，做倒角',
+      freecadRequested: false,
+    });
+    const updated = extractRequirementSnapshot({
+      content: '不要倒角',
+      freecadRequested: false,
+      previous,
+    });
+
+    expect(previous.features).toContain('chamfer');
+    expect(updated.features).not.toContain('chamfer');
+  });
 });

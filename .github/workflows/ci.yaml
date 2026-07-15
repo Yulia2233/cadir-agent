@@ -92,6 +92,8 @@ jobs:
           cache-to: type=gha,mode=max
       - name: Build Runner image
         run: docker build -f services/runner/Dockerfile -t cadir-runner:ci .
+      - name: Build pinned OpenCode image
+        run: docker build -f packages/opencode-cadir/Dockerfile -t cadir-opencode:ci .
       - name: Verify Runner container isolation
         env:
           RUNNER_IMAGE: cadir-runner:ci

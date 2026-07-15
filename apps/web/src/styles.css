@@ -38,6 +38,78 @@ textarea:focus-visible {
   outline-offset: 2px;
 }
 
+.auth-shell {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+  color: #1d2630;
+  background: #eef2f5;
+}
+.auth-panel {
+  width: min(100%, 420px);
+  padding: 32px;
+  border: 1px solid #d7dee4;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 48px rgba(22, 35, 46, 0.1);
+}
+.auth-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #167c75;
+  font-weight: 750;
+}
+.auth-panel h1 {
+  margin: 24px 0 8px;
+  font-size: 25px;
+}
+.auth-panel > p {
+  margin: 0 0 24px;
+  color: #687582;
+  line-height: 1.5;
+}
+.auth-panel form,
+.auth-panel label {
+  display: flex;
+  flex-direction: column;
+}
+.auth-panel form {
+  gap: 16px;
+}
+.auth-panel label {
+  gap: 7px;
+  color: #3b4650;
+  font-size: 13px;
+  font-weight: 650;
+}
+.auth-panel input {
+  width: 100%;
+  height: 42px;
+  padding: 0 11px;
+  border: 1px solid #c8d0d7;
+  border-radius: 5px;
+  color: #1d2630;
+  background: #ffffff;
+}
+.auth-panel .primary-command {
+  height: 42px;
+  margin-top: 4px;
+}
+.auth-panel .primary-command:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+.auth-error {
+  color: #a52e39;
+  font-size: 13px;
+}
+.auth-loading {
+  color: #687582;
+  font-size: 14px;
+}
+
 .app-shell {
   --bg: #f5f7f9;
   --panel: #ffffff;
@@ -1034,18 +1106,18 @@ textarea:focus-visible {
   .conversation-row > span,
   .conversation-row .icon-button,
   .archive-link,
-  .primary-command {
+  .sidebar > .primary-command {
     display: none;
   }
   .brand-row > .icon-button {
     display: none;
   }
-  .primary-command {
+  .sidebar > .primary-command {
     width: 38px;
     margin: 0 auto;
     padding: 0;
   }
-  .primary-command svg {
+  .sidebar > .primary-command svg {
     display: block;
   }
   .search-field {
@@ -1084,6 +1156,38 @@ textarea:focus-visible {
   }
   .sidebar {
     display: none;
+  }
+  .app-shell:not(.sidebar-collapsed) .sidebar {
+    display: flex;
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: min(86vw, 320px);
+    z-index: 30;
+    box-shadow: 18px 0 44px rgb(19 33 44 / 18%);
+  }
+  .app-shell:not(.sidebar-collapsed) .sidebar .brand-row {
+    justify-content: initial;
+    padding: 0 4px;
+  }
+  .app-shell:not(.sidebar-collapsed) .sidebar .brand-row div:last-child,
+  .app-shell:not(.sidebar-collapsed) .sidebar .search-field input,
+  .app-shell:not(.sidebar-collapsed) .sidebar .conversation-group h2,
+  .app-shell:not(.sidebar-collapsed) .sidebar .conversation-row > span,
+  .app-shell:not(.sidebar-collapsed) .sidebar .conversation-row .icon-button,
+  .app-shell:not(.sidebar-collapsed) .sidebar .archive-link,
+  .app-shell:not(.sidebar-collapsed) .sidebar > .primary-command,
+  .app-shell:not(.sidebar-collapsed) .sidebar .brand-row > .icon-button {
+    display: flex;
+  }
+  .app-shell:not(.sidebar-collapsed) .sidebar > .primary-command,
+  .app-shell:not(.sidebar-collapsed) .sidebar .search-field,
+  .app-shell:not(.sidebar-collapsed) .sidebar .conversation-row {
+    width: 100%;
+    margin-inline: 0;
+  }
+  .app-shell:not(.sidebar-collapsed) .sidebar .conversation-row {
+    display: grid;
+    height: auto;
   }
   .chat-panel {
     min-height: 100vh;

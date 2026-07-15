@@ -5,11 +5,16 @@ import type { UserRole } from '@prisma/client';
 import { sha256, secureHashEquals } from '../lib/crypto.js';
 import { forbidden, unauthorized } from '../lib/errors.js';
 
-const SESSION_COOKIE = '__Host-cadir_session';
+const SECURE_SESSION_COOKIE = '__Host-cadir_session';
+const LOCAL_SESSION_COOKIE = 'cadir_session';
+
+export function sessionCookieName(secure: boolean): string {
+  return secure ? SECURE_SESSION_COOKIE : LOCAL_SESSION_COOKIE;
+}
 
 export const authPlugin = fp(async (app) => {
   app.decorate('authenticate', async (request: FastifyRequest) => {
-    const sessionToken = request.cookies[SESSION_COOKIE];
+    const sessionToken = request.cookies[sessionCookieName(app.config.COOKIE_SECURE)];
     if (sessionToken === undefined) throw unauthorized();
 
     const session = await app.prisma.authSession.findUnique({
@@ -50,5 +55,3 @@ export const authPlugin = fp(async (app) => {
     };
   });
 });
-
-export { SESSION_COOKIE };

@@ -80,6 +80,23 @@ describe('task worker workflow contract', () => {
     }
   });
 
+  it('keeps optional FreeCAD conversion after core revision publication', async () => {
+    const source = await readFile(
+      new URL('../src/services/task-worker.ts', import.meta.url),
+      'utf8',
+    );
+    const processBody = source.slice(
+      source.indexOf('public async process'),
+      source.indexOf('private async move'),
+    );
+    expect(processBody.indexOf('await this.publishRevision')).toBeLessThan(
+      processBody.indexOf('await this.convertFreeCad'),
+    );
+    expect(source).toContain("'/internal/convert'");
+    expect(source).toContain("type: 'FREECAD_SCRIPT'");
+    expect(source).toContain("type: 'freecad.conversion.failed'");
+  });
+
   it('returns structured failures to CODE and stops at NEEDS_USER', async () => {
     const source = await readFile(
       new URL('../src/services/task-worker.ts', import.meta.url),

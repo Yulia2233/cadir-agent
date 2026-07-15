@@ -22,13 +22,20 @@ export const conversationRoutes: FastifyPluginAsync = async (app) => {
     const workspaceId = randomUUID();
     const storagePath = `${app.config.WORKSPACE_ROOT}/${workspaceId}`;
     await createWorkspace(app.config.WORKSPACE_ROOT, workspaceId);
+    const opencodeSession = await app.opencode
+      .createSession({ directory: storagePath, title: 'New CAD conversation' })
+      .catch(async (error: unknown) => {
+        await removeWorkspace(app.config.WORKSPACE_ROOT, workspaceId);
+        throw error;
+      });
+    const opencodeSessionId = opencodeSession.id;
     const conversation = await app.prisma
       .$transaction(async (tx) => {
         const created = await tx.conversation.create({
           data: {
             id: conversationId,
             userId: request.authUser.id,
-            opencodeSessionId: `pending:${randomUUID()}`,
+            opencodeSessionId,
           },
         });
         await tx.workspace.create({
@@ -46,6 +53,7 @@ export const conversationRoutes: FastifyPluginAsync = async (app) => {
       })
       .catch(async (error: unknown) => {
         await removeWorkspace(app.config.WORKSPACE_ROOT, workspaceId);
+        await app.opencode.deleteSession(opencodeSession.id, storagePath).catch(() => undefined);
         throw error;
       });
     return reply.status(201).send(conversation);
@@ -113,6 +121,7 @@ export const conversationRoutes: FastifyPluginAsync = async (app) => {
     const { id } = idSchema.parse(request.params);
     const existing = await app.prisma.conversation.findFirst({
       where: { id, userId: request.authUser.id, deletedAt: null },
+      include: { workspace: true },
     });
     if (existing === null) throw notFound();
     await app.prisma.$transaction([
@@ -125,6 +134,16 @@ export const conversationRoutes: FastifyPluginAsync = async (app) => {
         data: { status: 'DELETING', deletedAt: new Date() },
       }),
     ]);
+    if (existing.workspace !== null) {
+      await app.opencode
+        .deleteSession(existing.opencodeSessionId, existing.workspace.storagePath)
+        .catch((error: unknown) => {
+          request.log.warn(
+            { errorType: error instanceof Error ? error.name : 'unknown' },
+            'OpenCode session cleanup deferred',
+          );
+        });
+    }
     return reply.status(204).send();
   });
 };

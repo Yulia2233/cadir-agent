@@ -83,7 +83,10 @@ export const messageRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const waitingTask = await app.prisma.task.findFirst({
-        where: { conversationId: id, status: TaskStatus.WAITING_USER },
+        where: {
+          conversationId: id,
+          status: { in: [TaskStatus.WAITING_USER, TaskStatus.NEEDS_USER] },
+        },
         orderBy: { createdAt: 'desc' },
       });
       if (waitingTask !== null) {
@@ -143,7 +146,7 @@ export const messageRoutes: FastifyPluginAsync = async (app) => {
             await resumeLock.release(id, waitingTask.id);
             throw error;
           });
-        await app.redis.lpush('queue:cadir:tasks', waitingTask.id);
+        await app.taskQueue.add(waitingTask.id, waitingTask.iterationCount);
         return reply
           .status(202)
           .send({ message, task: { ...waitingTask, requirementSnapshot: snapshot } });
@@ -258,7 +261,7 @@ export const messageRoutes: FastifyPluginAsync = async (app) => {
           if (guard.allowed) await lock.release(id, taskId);
           throw error;
         });
-      if (guard.allowed) await app.redis.lpush('queue:cadir:tasks', result.task.id);
+      if (guard.allowed) await app.taskQueue.add(result.task.id, result.task.iterationCount);
       return reply.status(guard.allowed ? 202 : 200).send(result);
     },
   );
@@ -270,6 +273,7 @@ export const messageRoutes: FastifyPluginAsync = async (app) => {
       const { id } = idSchema.parse(request.params);
       const conversation = await app.prisma.conversation.findFirst({
         where: { id, userId: request.authUser.id, deletedAt: null },
+        include: { workspace: true },
       });
       if (conversation === null) throw notFound();
       const task = await app.prisma.task.findFirst({
@@ -293,6 +297,16 @@ export const messageRoutes: FastifyPluginAsync = async (app) => {
           data: { taskId: task.id },
         });
       });
+      if (conversation.workspace !== null) {
+        await app.opencode
+          .abortSession(conversation.opencodeSessionId, conversation.workspace.storagePath)
+          .catch((error: unknown) => {
+            request.log.warn(
+              { errorType: error instanceof Error ? error.name : 'unknown' },
+              'OpenCode session abort deferred',
+            );
+          });
+      }
       return reply.status(202).send({ taskId: task.id, status: TaskStatus.ABORTING });
     },
   );

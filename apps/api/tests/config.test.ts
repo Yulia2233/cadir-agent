@@ -31,6 +31,12 @@ describe('server configuration', () => {
     ).toThrow(/internal Runner/);
   });
 
+  it('rejects a public FreeCAD Worker endpoint', () => {
+    expect(() =>
+      loadConfig({ ...baseEnvironment, FREECAD_INTERNAL_URL: 'https://freecad.example.com' }),
+    ).toThrow(/internal FreeCAD/);
+  });
+
   it('rejects a public OpenCode endpoint', () => {
     expect(() =>
       loadConfig({ ...baseEnvironment, OPENCODE_INTERNAL_URL: 'https://opencode.example.com' }),

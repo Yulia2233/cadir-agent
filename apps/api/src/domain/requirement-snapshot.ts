@@ -3,8 +3,21 @@ import { requirementSnapshotSchema, type Selection } from '@cadir/contracts';
 const dimensionPatterns: Array<[string, RegExp]> = [
   ['length', /(?:length|long|长)\s*[:=]?\s*(\d+(?:\.\d+)?)/iu],
   ['width', /(?:width|wide|宽)\s*[:=]?\s*(\d+(?:\.\d+)?)/iu],
-  ['thickness', /(?:thickness|thick|厚)\s*[:=]?\s*(\d+(?:\.\d+)?)/iu],
-  ['diameter', /(?:diameter|dia|直径|孔径)\s*[:=]?\s*(\d+(?:\.\d+)?)/iu],
+  ['thickness', /(?:thickness|thick|厚度?)\s*[:=]?\s*(\d+(?:\.\d+)?)/iu],
+  ['outerDiameter', /(?:outer\s+diameter|outside\s+diameter|外径)\s*[:=]?\s*(\d+(?:\.\d+)?)/iu],
+  [
+    'pitchCircleDiameter',
+    /(?:pitch\s+circle(?:\s+diameter)?|pcd|分度圆(?:直径)?)\s*[:=]?\s*(\d+(?:\.\d+)?)/iu,
+  ],
+  [
+    'centerHoleDiameter',
+    /(?:center\s+hole(?:\s+diameter)?|中心孔(?:直径|孔径)?)\s*[:=]?\s*(\d+(?:\.\d+)?)/iu,
+  ],
+  [
+    'holeDiameter',
+    /(?:mounting\s+hole(?:\s+diameter)?|安装孔(?:直径|孔径)?|孔径)\s*[:=]?\s*(\d+(?:\.\d+)?)/iu,
+  ],
+  ['diameter', /(?:diameter|dia|直径)\s*[:=]?\s*(\d+(?:\.\d+)?)/iu],
 ];
 
 function detectUnit(content: string): 'mm' | 'cm' | 'm' | 'in' {
@@ -16,9 +29,9 @@ function detectUnit(content: string): 'mm' | 'cm' | 'm' | 'in' {
 
 function detectPartType(content: string): string | null {
   const types: Array<[string, RegExp]> = [
-    ['mounting plate', /(?:mounting\s+plate|安装板|板)/iu],
     ['flange', /(?:flange|法兰)/iu],
     ['bracket', /(?:bracket|支架)/iu],
+    ['mounting plate', /(?:mounting\s+plate|安装板|板)/iu],
   ];
   return types.find(([, pattern]) => pattern.test(content))?.[0] ?? null;
 }
@@ -46,17 +59,34 @@ export function extractRequirementSnapshot(input: {
     const match = input.content.match(pattern);
     if (match?.[1] !== undefined) dimensions[name] = Number(match[1]);
   }
+  const trailingPitchCircle = input.content.match(
+    /(?:直径|diameter)\s*[:=]?\s*(\d+(?:\.\d+)?)\s*(?:毫米|mm)?[^。,.]{0,12}(?:分度圆|pitch\s+circle)/iu,
+  );
+  if (trailingPitchCircle?.[1] !== undefined) {
+    dimensions.pitchCircleDiameter = Number(trailingPitchCircle[1]);
+  }
 
   const features = new Set(previous?.features ?? []);
   if (/(?:hole|孔)/iu.test(input.content)) features.add('hole');
-  if (/(?:fillet|圆角)/iu.test(input.content)) features.add('fillet');
-  if (/(?:chamfer|倒角)/iu.test(input.content)) features.add('chamfer');
+  if (/(?:fillet|圆角)/iu.test(input.content)) {
+    if (isNegatedFeature(input.content, /(?:fillet|圆角)/iu)) features.delete('fillet');
+    else features.add('fillet');
+  }
+  if (/(?:chamfer|倒角)/iu.test(input.content)) {
+    if (isNegatedFeature(input.content, /(?:chamfer|倒角)/iu)) features.delete('chamfer');
+    else features.add('chamfer');
+  }
 
   const partType = detectPartType(input.content) ?? previous?.partType ?? null;
   const missing: string[] = [];
   if (partType === null) missing.push('partType');
   if (partType === 'mounting plate') {
     for (const dimension of ['length', 'width', 'thickness']) {
+      if (dimensions[dimension] === undefined) missing.push(dimension);
+    }
+  }
+  if (partType === 'flange') {
+    for (const dimension of ['outerDiameter', 'thickness']) {
       if (dimensions[dimension] === undefined) missing.push(dimension);
     }
   }
@@ -82,6 +112,13 @@ export function extractRequirementSnapshot(input: {
     missing,
     conflicts,
   });
+}
+
+function isNegatedFeature(content: string, feature: RegExp): boolean {
+  const match = feature.exec(content);
+  if (match?.index === undefined) return false;
+  const prefix = content.slice(Math.max(0, match.index - 12), match.index);
+  return /(?:不要(?:做|加|使用)?|不做|无需|无|禁止|without|no)\s*$/iu.test(prefix);
 }
 
 export function selectionContext(selection: Selection) {

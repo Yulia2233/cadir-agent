@@ -79,6 +79,37 @@ export async function freezeWorkingCopy(
   return destination;
 }
 
+/**
+ * Restore the writable permissions required by a disposable Working Copy.
+ * Frozen Revision snapshots intentionally use read-only permissions; copying
+ * one into a new task must not carry those permissions into the next run.
+ */
+export async function makeWorkingCopyWritable(directory: string): Promise<void> {
+  const resolved = await realpath(directory);
+  await makeTreeWritable(resolved);
+}
+
+async function makeTreeWritable(directory: string): Promise<void> {
+  const entries = await readdir(directory, { withFileTypes: true });
+  for (const entry of entries) {
+    const item = path.join(directory, entry.name);
+    if (entry.isSymbolicLink()) {
+      throw new AppError(400, 'INVALID_WORKING_COPY', 'Working copy contains a symbolic link');
+    }
+    if (entry.isDirectory()) {
+      await makeTreeWritable(item);
+      await chmod(item, 0o2770);
+      continue;
+    }
+    const linkCount = (await lstat(item)).nlink;
+    if (linkCount > 1) {
+      throw new AppError(400, 'INVALID_WORKING_COPY', 'Working copy contains a hard link');
+    }
+    await chmod(item, 0o660);
+  }
+  await chmod(directory, 0o2770);
+}
+
 async function makeTreeReadOnly(directory: string): Promise<void> {
   const entries = await readdir(directory, { withFileTypes: true });
   for (const entry of entries) {

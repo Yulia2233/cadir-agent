@@ -1,4 +1,16 @@
-import { Check, KeyRound, LoaderCircle, Plus, Server, Trash2, X } from 'lucide-react';
+import {
+  Check,
+  KeyRound,
+  ListRestart,
+  LoaderCircle,
+  Pencil,
+  Plus,
+  Save,
+  Server,
+  Star,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { useState } from 'react';
 import type { ProviderConfig } from '../types';
 import { IconButton } from './IconButton';
@@ -14,33 +26,51 @@ const emptyDraft: ProviderDraft = {
   provider: 'OpenAI compatible',
   baseUrl: '',
   apiKey: '',
-  modelId: '',
+  // Match the stable model alias configured by the internal OpenCode agent.
+  modelId: '5.6-sol',
 };
 
 export function SettingsDialog({
   configs,
   onClose,
   onCreate,
+  onUpdate,
   onDelete,
   onTest,
+  onLoadModels,
 }: {
   configs: ProviderConfig[];
   onClose: () => void;
   onCreate: (draft: ProviderDraft) => Promise<void>;
+  onUpdate: (id: string, draft: Partial<ProviderDraft> & { isDefault?: boolean }) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onTest: (id: string) => Promise<'succeeded' | 'failed'>;
+  onLoadModels: (id: string) => Promise<string[]>;
 }) {
   const [draft, setDraft] = useState(emptyDraft);
   const [creating, setCreating] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<Record<string, 'succeeded' | 'failed'>>({});
+  const [models, setModels] = useState<string[]>([]);
+  const [loadingModelsId, setLoadingModelsId] = useState<string | null>(null);
 
   const submit = async () => {
-    if (!draft.baseUrl || !draft.apiKey || !draft.modelId || creating) return;
+    if (!draft.baseUrl || !draft.modelId || (editingId === null && !draft.apiKey) || creating)
+      return;
     setCreating(true);
     try {
-      await onCreate(draft);
+      if (editingId === null) await onCreate(draft);
+      else {
+        await onUpdate(editingId, {
+          provider: draft.provider,
+          baseUrl: draft.baseUrl,
+          modelId: draft.modelId,
+          ...(draft.apiKey ? { apiKey: draft.apiKey } : {}),
+        });
+      }
       setDraft(emptyDraft);
+      setEditingId(null);
     } finally {
       setCreating(false);
     }
@@ -84,6 +114,59 @@ export function SettingsDialog({
                     <small>{config.baseUrl}</small>
                   </div>
                   {config.isDefault && <span className="default-label">Default</span>}
+                  {!config.isDefault && (
+                    <button
+                      className="secondary-command"
+                      title="Set as default provider"
+                      onClick={() => void onUpdate(config.id, { isDefault: true })}
+                    >
+                      <Star size={15} />
+                      Default
+                    </button>
+                  )}
+                  <button
+                    className="secondary-command"
+                    title="Edit provider"
+                    onClick={() => {
+                      setEditingId(config.id);
+                      setDraft({
+                        provider: config.provider,
+                        baseUrl: config.baseUrl,
+                        modelId: config.modelId,
+                        apiKey: '',
+                      });
+                    }}
+                  >
+                    <Pencil size={15} />
+                    Edit
+                  </button>
+                  <button
+                    className="secondary-command"
+                    title="Load available models"
+                    disabled={loadingModelsId === config.id}
+                    onClick={() => {
+                      setLoadingModelsId(config.id);
+                      void onLoadModels(config.id)
+                        .then((items) => {
+                          setModels(items);
+                          setEditingId(config.id);
+                          setDraft({
+                            provider: config.provider,
+                            baseUrl: config.baseUrl,
+                            modelId: config.modelId,
+                            apiKey: '',
+                          });
+                        })
+                        .finally(() => setLoadingModelsId(null));
+                    }}
+                  >
+                    {loadingModelsId === config.id ? (
+                      <LoaderCircle className="spin-icon" size={15} />
+                    ) : (
+                      <ListRestart size={15} />
+                    )}
+                    Models
+                  </button>
                   <button
                     className="secondary-command"
                     disabled={testingId === config.id}
@@ -101,7 +184,11 @@ export function SettingsDialog({
                     ) : (
                       <Check size={15} />
                     )}
-                    {testResult[config.id] === 'failed' ? 'Retry' : 'Test'}
+                    {testResult[config.id] === 'succeeded'
+                      ? 'Connected'
+                      : testResult[config.id] === 'failed'
+                        ? 'Retry'
+                        : 'Test'}
                   </button>
                   <IconButton
                     label={`Delete ${config.provider}`}
@@ -114,7 +201,7 @@ export function SettingsDialog({
             )}
           </section>
           <section className="provider-form">
-            <h3>Add provider</h3>
+            <h3>{editingId === null ? 'Add provider' : 'Edit provider'}</h3>
             <label>
               Provider
               <input
@@ -126,7 +213,7 @@ export function SettingsDialog({
               Base URL
               <input
                 type="url"
-                placeholder="https://provider.example/v1"
+                placeholder="https://api.example.com/v1"
                 value={draft.baseUrl}
                 onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })}
               />
@@ -134,10 +221,16 @@ export function SettingsDialog({
             <label>
               Model
               <input
+                list="provider-models"
                 placeholder="Model ID"
                 value={draft.modelId}
                 onChange={(event) => setDraft({ ...draft, modelId: event.target.value })}
               />
+              <datalist id="provider-models">
+                {models.map((model) => (
+                  <option key={model} value={model} />
+                ))}
+              </datalist>
             </label>
             <label>
               API key
@@ -146,16 +239,36 @@ export function SettingsDialog({
                 <input
                   type="password"
                   autoComplete="new-password"
-                  placeholder="Enter or replace key"
+                  placeholder={
+                    editingId === null ? 'Enter API key' : 'Leave blank to keep current key'
+                  }
                   value={draft.apiKey}
                   onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })}
                 />
               </span>
             </label>
             <button className="primary-command" disabled={creating} onClick={() => void submit()}>
-              {creating ? <LoaderCircle className="spin-icon" size={16} /> : <Plus size={16} />}
-              Add provider
+              {creating ? (
+                <LoaderCircle className="spin-icon" size={16} />
+              ) : editingId === null ? (
+                <Plus size={16} />
+              ) : (
+                <Save size={16} />
+              )}
+              {editingId === null ? 'Add provider' : 'Save provider'}
             </button>
+            {editingId !== null && (
+              <button
+                className="secondary-command"
+                onClick={() => {
+                  setEditingId(null);
+                  setDraft(emptyDraft);
+                }}
+              >
+                <X size={15} />
+                Cancel edit
+              </button>
+            )}
           </section>
         </div>
       </section>

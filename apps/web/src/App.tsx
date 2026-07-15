@@ -2,6 +2,7 @@ import { Menu, Settings, UserRound } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiRequest, ApiError, openEventStream, setCsrfToken } from './api/client';
 import { Composer } from './components/Composer';
+import { AuthScreen } from './components/AuthScreen';
 import { IconButton } from './components/IconButton';
 import { ModelPanel } from './components/ModelPanel';
 import { SettingsDialog } from './components/SettingsDialog';
@@ -9,6 +10,7 @@ import { Sidebar } from './components/Sidebar';
 import { Timeline } from './components/Timeline';
 import { UserMenu } from './components/UserMenu';
 import { useColorScheme } from './hooks/useColorScheme';
+import { eventStreamKey } from './event-stream-key';
 import { useLocalStorageState } from './hooks/useLocalStorageState';
 import { useWorkbench } from './state/workbench';
 import type {
@@ -50,6 +52,10 @@ const phaseLabels: Record<TaskPhase, string> = {
   COMPLETED: 'Task completed',
 };
 
+export function isRunningPhase(phase: TaskPhase): boolean {
+  return !['COMPLETED', 'FAILED', 'NEEDS_USER', 'WAITING_USER', 'REJECTED'].includes(phase);
+}
+
 type ConversationPage = {
   items: Array<ConversationSummary & { updatedAt: string }>;
   nextCursor: string | null;
@@ -66,6 +72,7 @@ type MessagePage = {
 
 export function App() {
   const workbench = useWorkbench();
+  const setActiveConversation = workbench.setActiveConversation;
   const { preference, resolved, setPreference } = useColorScheme();
   const [conversations, setConversations] = useLocalStorageState<ConversationSummary[]>(
     'cadir.local.conversations',
@@ -79,10 +86,15 @@ export function App() {
   const [running, setRunning] = useState(false);
   const [phase, setPhase] = useState<TaskPhase>('DOMAIN_GUARD');
   const [streamStatus, setStreamStatus] = useState<'idle' | 'connected' | 'reconnecting'>('idle');
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(
+    () => !window.matchMedia('(max-width: 780px)').matches,
+  );
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [offlineMode, setOfflineMode] = useState(false);
+  const [authState, setAuthState] = useState<'loading' | 'authenticated' | 'login' | 'bootstrap'>(
+    'loading',
+  );
   const [error, setError] = useState<string | null>(null);
   const [selections, setSelections] = useState<SelectionContext[]>([]);
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -94,6 +106,7 @@ export function App() {
     [conversations, workbench.activeConversationId],
   );
   const messages = active === undefined ? [] : (messagesByConversation[active.id] ?? []);
+  const activeConversationId = eventStreamKey(active);
 
   const updateConversation = useCallback(
     (id: string, patch: Partial<ConversationSummary>) => {
@@ -122,21 +135,37 @@ export function App() {
       apiRequest<{ user: UserProfile }>('/api/me', { signal: controller.signal }),
       apiRequest<ConversationPage>('/api/conversations?limit=50', { signal: controller.signal }),
     ])
-      .then(([me, page]) => {
+      .then(async ([me, page]) => {
         setUser(me.user);
+        setAuthState('authenticated');
         setOfflineMode(false);
-        if (page.items.length > 0) {
-          setConversations(page.items);
-          workbench.setActiveConversation(page.items[0]?.id ?? null);
-        }
+        const serverConversations =
+          page.items.length > 0
+            ? page.items
+            : [
+                await apiRequest<ConversationSummary>('/api/conversations', {
+                  method: 'POST',
+                  signal: controller.signal,
+                }),
+              ];
+        setConversations(serverConversations);
+        setMessagesByConversation({});
+        setActiveConversation(serverConversations[0]?.id ?? null);
         void loadConfigs();
       })
       .catch((caught: unknown) => {
         if (caught instanceof DOMException && caught.name === 'AbortError') return;
-        setOfflineMode(true);
+        if (caught instanceof ApiError && caught.status === 401) {
+          void apiRequest<{ available: boolean }>('/api/auth/bootstrap/status')
+            .then(({ available }) => setAuthState(available ? 'bootstrap' : 'login'))
+            .catch(() => setAuthState('login'));
+        } else {
+          setOfflineMode(true);
+          setAuthState('authenticated');
+        }
       });
     return () => controller.abort();
-  }, [loadConfigs, setConversations, workbench]);
+  }, [loadConfigs, setActiveConversation, setConversations, setMessagesByConversation]);
 
   const loadMessages = useCallback(
     async (conversationId: string) => {
@@ -173,7 +202,7 @@ export function App() {
         const nextPhase = parsed.data.phase;
         if (typeof nextPhase === 'string' && nextPhase in phaseLabels) {
           setPhase(nextPhase as TaskPhase);
-          setRunning(!['COMPLETED', 'FAILED', 'NEEDS_USER', 'REJECTED'].includes(nextPhase));
+          setRunning(isRunningPhase(nextPhase as TaskPhase));
         }
       }
       if (parsed.type === 'conversation.title.updated' && typeof parsed.data.title === 'string') {
@@ -197,16 +226,16 @@ export function App() {
   useEffect(() => {
     eventSourceRef.current?.close();
     eventSourceRef.current = null;
-    if (active === undefined || active.id.startsWith('local-') || offlineMode) {
+    if (activeConversationId === null || activeConversationId.startsWith('local-') || offlineMode) {
       setStreamStatus('idle');
       return;
     }
-    const source = openEventStream(active.id, handleEvent);
+    const source = openEventStream(activeConversationId, handleEvent);
     eventSourceRef.current = source;
     source.onopen = () => setStreamStatus('connected');
     source.onerror = () => setStreamStatus('reconnecting');
     return () => source.close();
-  }, [active, handleEvent, offlineMode]);
+  }, [activeConversationId, handleEvent, offlineMode]);
 
   const appendMessage = (conversationId: string, message: TimelineMessage) => {
     setMessagesByConversation((items) => ({
@@ -350,6 +379,26 @@ export function App() {
     window.location.reload();
   };
 
+  if (authState === 'loading') {
+    return (
+      <main className="auth-shell">
+        <div className="auth-loading">Loading CADIR Agent</div>
+      </main>
+    );
+  }
+  if (authState === 'login' || authState === 'bootstrap') {
+    return (
+      <AuthScreen
+        bootstrap={authState === 'bootstrap'}
+        onAuthenticated={(profile) => {
+          setUser(profile);
+          setAuthState('authenticated');
+          window.location.reload();
+        }}
+      />
+    );
+  }
+
   return (
     <div className={`app-shell theme-${resolved} ${sidebarOpen ? '' : 'sidebar-collapsed'}`}>
       {sidebarOpen && (
@@ -450,6 +499,17 @@ export function App() {
           configs={configs}
           onClose={() => setSettingsOpen(false)}
           onCreate={createConfig}
+          onUpdate={async (id, draft) => {
+            const updated = await apiRequest<ProviderConfig>(`/api/me/model-configs/${id}`, {
+              method: 'PATCH',
+              body: JSON.stringify(draft),
+            });
+            setConfigs((items) =>
+              items.map((item) =>
+                item.id === id ? updated : updated.isDefault ? { ...item, isDefault: false } : item,
+              ),
+            );
+          }}
           onDelete={async (id) => {
             await apiRequest(`/api/me/model-configs/${id}`, { method: 'DELETE' });
             setConfigs((items) => items.filter((item) => item.id !== id));
@@ -460,6 +520,12 @@ export function App() {
               { method: 'POST' },
             );
             return result.status;
+          }}
+          onLoadModels={async (id) => {
+            const result = await apiRequest<{ items: string[] }>(
+              `/api/me/model-configs/${id}/models`,
+            );
+            return result.items;
           }}
         />
       )}

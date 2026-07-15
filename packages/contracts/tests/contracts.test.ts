@@ -5,6 +5,7 @@ import {
   eventDataSchemas,
   eventTypeSchema,
   freecadConversionSchema,
+  providerModelsSchema,
   requirementSnapshotSchema,
   restApiSchema,
   taskPhaseSchema,
@@ -15,6 +16,11 @@ import {
 describe('shared contracts', () => {
   it('publishes an explicit compatibility version', () => {
     expect(API_CONTRACT_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
+  });
+
+  it('bounds provider model-list responses', () => {
+    expect(providerModelsSchema.parse({ items: ['5.6-sol'] }).items).toEqual(['5.6-sol']);
+    expect(providerModelsSchema.safeParse({ items: [''] }).success).toBe(false);
   });
 
   it('keeps REST operation names and routes unique', () => {

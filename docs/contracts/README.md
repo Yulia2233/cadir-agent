@@ -8,6 +8,10 @@ The initial surface includes the REST route registry, common response models, Ta
 statuses and phases, Artifact and Case enums, Selection records, Viewer manifests,
 and every public CADIR event listed in the product requirements.
 
+Provider configuration routes include a server-side connection probe and a bounded
+OpenAI-compatible model-list operation. Both use the encrypted user credential at
+the API boundary; the Web receives model IDs only and never receives the key.
+
 The canonical wire format uses camelCase for REST JSON and snake_case for the SSE
 envelope retained by the requirements (`event_id`, `conversation_id`, `task_id`).
 This exception is deliberate and must not be normalized independently by consumers.

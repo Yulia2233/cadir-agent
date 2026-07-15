@@ -36,7 +36,9 @@ The product source lives in this directory. `apps/api` and `apps/web` are indepe
    pnpm test:e2e
    ```
 
-The API listens on `http://localhost:8080` and exposes liveness/readiness at `/health/live` and `/health/ready`. The Web development server listens on `http://localhost:3000` after `apps/web` is enabled.
+The API listens on `http://localhost:8080` and exposes liveness/readiness at `/health/live` and `/health/ready`. The containerized Web workbench listens on `http://localhost:3000` and proxies authenticated `/api/` requests to the internal API.
+
+Windows developers should run `pwsh scripts/dev-env.ps1 up`; Linux and macOS developers should run `./scripts/dev-env.sh up`. CAD execution and FreeCAD conversion always run in the checked Linux containers, so Windows development does not require a host Python CAD installation. See `docs/development/LOCAL_ENVIRONMENT.md` for filesystem, line-ending, networking, and permission differences.
 
 ## Server deployment
 
