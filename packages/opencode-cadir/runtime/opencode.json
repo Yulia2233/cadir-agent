@@ -1,0 +1,68 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "autoupdate": false,
+  "share": "disabled",
+  "default_agent": "cadir",
+  "enabled_providers": ["cadir-provider"],
+  "plugin": ["file:///opt/cadir/cadir-plugin.js"],
+  "provider": {
+    "cadir-provider": {
+      "name": "CADIR OpenAI-compatible Provider",
+      "npm": "@ai-sdk/openai-compatible",
+      "env": ["CADIR_PROVIDER_API_KEY"],
+      "models": {
+        "5.6-sol": {
+          "name": "5.6 sol",
+          "tool_call": true,
+          "reasoning": true,
+          "limit": {
+            "context": 200000,
+            "output": 32768
+          }
+        }
+      },
+      "options": {
+        "apiKey": "cadir-provider-proxy",
+        "baseURL": "http://api:8080/internal/provider/v1"
+      }
+    }
+  },
+  "agent": {
+    "cadir": {
+      "description": "Restricted CADIR CAD modeling agent",
+      "mode": "primary",
+      "model": "cadir-provider/5.6-sol",
+      "steps": 24,
+      "permission": {
+        "*": "deny",
+        "load_simplecad_skill": "allow",
+        "search_model_cases": "allow",
+        "get_model_case": "allow",
+        "write_model": "allow",
+        "read_model": "allow",
+        "execute_model": "allow",
+        "inspect_geometry": "allow",
+        "render_model_views": "allow",
+        "export_model_artifacts": "allow",
+        "convert_freecad_artifacts": "allow"
+      }
+    },
+    "plan": {
+      "description": "Read-only CAD planning agent",
+      "mode": "primary",
+      "model": "cadir-provider/5.6-sol",
+      "steps": 12,
+      "permission": {
+        "*": "deny",
+        "load_simplecad_skill": "allow",
+        "search_model_cases": "allow",
+        "get_model_case": "allow",
+        "read_model": "allow",
+        "inspect_geometry": "allow"
+      }
+    }
+  },
+  "permission": {
+    "*": "deny"
+  }
+}

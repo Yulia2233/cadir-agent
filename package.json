@@ -20,6 +20,7 @@
     "dev:up": "docker compose -f infra/compose.yaml up -d --build",
     "dev:down": "docker compose -f infra/compose.yaml down",
     "dev:health": "node scripts/healthcheck.mjs",
+    "dev:data": "node scripts/dev-data.mjs",
     "server:check": "node scripts/server-deploy.mjs check",
     "server:up": "node scripts/server-deploy.mjs up",
     "server:health": "node scripts/server-deploy.mjs health",

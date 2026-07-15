@@ -3,13 +3,23 @@ import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { TaskMode, TaskPhase, TaskStatus, type PrismaClient } from '@prisma/client';
 import type { Redis } from 'ioredis';
+import { Worker } from 'bullmq';
 import { requirementSnapshotSchema } from '@cadir/contracts';
 import type { FastifyBaseLogger } from 'fastify';
+import { CAD_AGENT_SYSTEM_PROMPT, type OpenCodeClient } from '@cadir/opencode-adapter';
 import { publishDomainEvent } from './events.js';
 import { ConversationTaskLock } from './task-lock.js';
 import { transitionTask } from './task-state.js';
 import type { ObjectStore } from './object-store.js';
-import { freezeWorkingCopy } from './workspaces.js';
+import { freezeWorkingCopy, makeWorkingCopyWritable } from './workspaces.js';
+import { writeAttemptHistory } from './attempt-history.js';
+import {
+  decideRepair,
+  isRepairableCadError,
+  RepairableCadError,
+  repairEvidence,
+} from './repair-policy.js';
+import { CAD_TASK_QUEUE, type CadTaskJobData } from './task-queue.js';
 
 type WorkerContext = {
   prisma: PrismaClient;
@@ -19,39 +29,48 @@ type WorkerContext = {
   workspaceRoot: string;
   skillVersion: string;
   objectStore: ObjectStore;
+  opencode: OpenCodeClient;
+  maxAutoIterations: number;
 };
 
+// OpenCode uses a stable internal alias. The CADIR proxy replaces it with the
+// authenticated user's current model ID at the outbound provider boundary.
+const INTERNAL_PROVIDER_MODEL_ALIAS = '5.6-sol';
+
 export class TaskWorker {
-  #stopping = false;
-  #running: Promise<void> | null = null;
+  #worker: Worker<CadTaskJobData> | null = null;
 
   public constructor(private readonly context: WorkerContext) {}
 
-  public start(pollSeconds: number): void {
-    this.#stopping = false;
-    this.#running = this.loop(pollSeconds);
+  public start(): void {
+    if (this.#worker !== null) return;
+    this.#worker = new Worker<CadTaskJobData>(
+      CAD_TASK_QUEUE,
+      async (job) => this.process(job.data.taskId),
+      {
+        connection: this.context.redis,
+        concurrency: 4,
+        lockDuration: 10 * 60 * 1_000,
+        maxStalledCount: 2,
+        removeOnComplete: { age: 24 * 60 * 60, count: 5_000 },
+        removeOnFail: { age: 30 * 24 * 60 * 60, count: 10_000 },
+      },
+    );
+    this.#worker.on('error', (error) => {
+      this.context.logger.error({ errorType: error.name }, 'CAD task queue worker error');
+    });
+    this.#worker.on('failed', (job, error) => {
+      this.context.logger.error(
+        { jobId: job?.id, taskId: job?.data.taskId, errorType: error.name },
+        'CAD task queue job failed',
+      );
+    });
   }
 
   public async stop(): Promise<void> {
-    this.#stopping = true;
+    await this.#worker?.close();
+    this.#worker = null;
     this.context.redis.disconnect(false);
-    await this.#running;
-  }
-
-  private async loop(pollSeconds: number): Promise<void> {
-    while (!this.#stopping) {
-      const result = await this.context.redis
-        .brpop('queue:cadir:tasks', pollSeconds)
-        .catch((error: unknown) => {
-          if (this.#stopping) return null;
-          throw error;
-        });
-      if (result === null) continue;
-      const taskId = result[1];
-      await this.process(taskId).catch((error: unknown) => {
-        this.context.logger.error({ taskId, error }, 'Task worker failed');
-      });
-    }
   }
 
   public async process(taskId: string): Promise<void> {
@@ -63,8 +82,7 @@ export class TaskWorker {
     const lock = new ConversationTaskLock(this.context.redis);
     if (!(await lock.renew(task.conversationId, task.id))) {
       if (!(await lock.acquire(task.conversationId, task.id))) {
-        await this.context.redis.lpush('queue:cadir:tasks', task.id);
-        return;
+        throw new Error('Conversation write lease is busy; retry the queued job');
       }
     }
     try {
@@ -85,12 +103,26 @@ export class TaskWorker {
       await this.move(task.id, task.conversationId, TaskPhase.ANALYZE, TaskPhase.RETRIEVE);
       await this.move(task.id, task.conversationId, TaskPhase.RETRIEVE, TaskPhase.PLAN);
       if (task.mode === TaskMode.PLAN) {
+        const requestMessage = await this.context.prisma.message.findFirstOrThrow({
+          where: { taskId: task.id, role: 'USER' },
+          orderBy: { createdAt: 'desc' },
+          select: { content: true },
+        });
+        const generated = await this.context.opencode.prompt({
+          sessionId: task.conversation.opencodeSessionId,
+          directory: task.workspace.storagePath,
+          mode: 'PLAN',
+          content: buildPlanPrompt(task.conversationId, task.id, requestMessage.content, snapshot),
+          system: CAD_AGENT_SYSTEM_PROMPT,
+          provider: { providerId: 'cadir-provider', modelId: INTERNAL_PROVIDER_MODEL_ALIAS },
+        });
         const message = await this.context.prisma.message.create({
           data: {
             conversationId: task.conversationId,
             taskId: task.id,
             role: 'AGENT',
-            content: planSummary(snapshot),
+            content: assistantText(generated.parts) ?? planSummary(snapshot),
+            opencodeMessageId: generated.messageId,
           },
         });
         await this.context.prisma.$transaction(async (tx) => {
@@ -113,43 +145,148 @@ export class TaskWorker {
       const loadedSkill = await this.loadRequiredSkill(task.conversationId, task.id);
       if (!loadedSkill) throw new Error('Required SimpleCADAPI Skill did not load');
       await this.move(task.id, task.conversationId, TaskPhase.PLAN, TaskPhase.CODE);
-      const modelPath = await this.prepareModel(
+      const modelPath = await this.prepareWorkingCopy(
         task.workspaceId,
         task.id,
         snapshot,
         task.conversation.currentRevisionId,
       );
-      await this.move(task.id, task.conversationId, TaskPhase.CODE, TaskPhase.EXECUTE);
-      const runtimeId = randomUUID();
-      await this.context.prisma.task.update({ where: { id: task.id }, data: { runtimeId } });
-      await publishDomainEvent(this.context.prisma, {
-        conversationId: task.conversationId,
-        taskId: task.id,
-        type: 'model.execution.started',
-        data: { runtimeId },
+      const requestMessage = await this.context.prisma.message.findFirstOrThrow({
+        where: { taskId: task.id, role: 'USER' },
+        orderBy: { createdAt: 'desc' },
+        select: { content: true },
       });
-      const execution = await fetch(new URL('/internal/execute', this.context.runnerUrl), {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          task_id: task.id,
-          workspace_path: path.dirname(path.dirname(modelPath)),
-          timeout_seconds: 300,
-          max_output_bytes: 1_048_576,
-        }),
-        signal: AbortSignal.timeout(310_000),
-      }).then(
-        async (response) =>
-          (await response.json()) as { status: string; exit_code: number | null; stderr: string },
-      );
-      if (execution.status !== 'succeeded') {
-        throw new Error(`Model execution ${execution.status}: ${execution.stderr.slice(0, 500)}`);
-      }
-      await this.move(task.id, task.conversationId, TaskPhase.EXECUTE, TaskPhase.VALIDATE);
-      await this.validateModel(task.workspaceId, task.id, snapshot);
-      await this.move(task.id, task.conversationId, TaskPhase.VALIDATE, TaskPhase.VISUAL_REVIEW);
       const revisionId = randomUUID();
-      await this.deriveArtifacts(task.workspaceId, task.conversationId, task.id, revisionId);
+      let repairEvidenceText: string | null = null;
+      let previousCodeChecksum: string | null = null;
+      let workflowSucceeded = false;
+      // A NEEDS_USER task can be resumed. Keep attempt directory numbers
+      // monotonic across resumptions so immutable evidence is never overwritten.
+      const attemptOffset = task.iterationCount;
+      for (let runAttempt = 1; runAttempt <= this.context.maxAutoIterations; runAttempt += 1) {
+        const iteration = attemptOffset + runAttempt;
+        await this.assertTaskActive(task.id);
+        await this.context.prisma.task.update({
+          where: { id: task.id },
+          data: { iterationCount: iteration },
+        });
+        let phase: TaskPhase = TaskPhase.CODE;
+        try {
+          const generated = await this.context.opencode.prompt({
+            sessionId: task.conversation.opencodeSessionId,
+            directory: task.workspace.storagePath,
+            mode: 'BUILD',
+            content: buildModelPrompt(
+              task.conversationId,
+              task.id,
+              requestMessage.content,
+              snapshot,
+              repairEvidenceText,
+            ),
+            system: CAD_AGENT_SYSTEM_PROMPT,
+            provider: { providerId: 'cadir-provider', modelId: INTERNAL_PROVIDER_MODEL_ALIAS },
+          });
+          await this.context.prisma.message.updateMany({
+            where: { taskId: task.id, role: 'USER', opencodeMessageId: null },
+            data: { opencodeMessageId: generated.messageId },
+          });
+          await readFile(modelPath, 'utf8').catch(() => {
+            throw new RepairableCadError(
+              'MODEL_NOT_WRITTEN',
+              'OpenCode completed without writing Model/model.py',
+            );
+          });
+          await this.move(task.id, task.conversationId, TaskPhase.CODE, TaskPhase.EXECUTE);
+          phase = TaskPhase.EXECUTE;
+          const runtimeId = randomUUID();
+          await this.context.prisma.task.update({ where: { id: task.id }, data: { runtimeId } });
+          await publishDomainEvent(this.context.prisma, {
+            conversationId: task.conversationId,
+            taskId: task.id,
+            type: 'model.execution.started',
+            data: { runtimeId },
+          });
+          const execution = await fetch(new URL('/internal/execute', this.context.runnerUrl), {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              task_id: task.id,
+              workspace_path: path.dirname(path.dirname(modelPath)),
+              timeout_seconds: 300,
+              max_output_bytes: 1_048_576,
+            }),
+            signal: AbortSignal.timeout(310_000),
+          }).then(
+            async (response) =>
+              (await response.json()) as {
+                status: string;
+                exit_code: number | null;
+                stderr: string;
+              },
+          );
+          if (execution.status !== 'succeeded') {
+            if (execution.status === 'rejected') {
+              throw new Error(
+                `Runner rejected unsafe or invalid model code: ${execution.stderr.slice(0, 500)}`,
+              );
+            }
+            throw new RepairableCadError(
+              `MODEL_EXECUTION_${execution.status.toUpperCase()}`,
+              `Model execution ${execution.status}: ${execution.stderr.slice(0, 500)}`,
+            );
+          }
+          await this.move(task.id, task.conversationId, TaskPhase.EXECUTE, TaskPhase.VALIDATE);
+          phase = TaskPhase.VALIDATE;
+          await this.validateModel(task.workspaceId, task.id, snapshot);
+          await this.move(
+            task.id,
+            task.conversationId,
+            TaskPhase.VALIDATE,
+            TaskPhase.VISUAL_REVIEW,
+          );
+          phase = TaskPhase.VISUAL_REVIEW;
+          await this.deriveArtifacts(task.workspaceId, task.conversationId, task.id, revisionId);
+          previousCodeChecksum = await this.recordAttempt({
+            workspaceId: task.workspaceId,
+            taskId: task.id,
+            modelPath,
+            phase,
+            iteration,
+            outcome: 'passed',
+            failureCode: null,
+            evidence: null,
+            previousCodeChecksum,
+          });
+          workflowSucceeded = true;
+          break;
+        } catch (error: unknown) {
+          const evidence = repairEvidence(error);
+          const failureCode =
+            error instanceof RepairableCadError ? error.code : 'NON_REPAIRABLE_FAILURE';
+          previousCodeChecksum = await this.recordAttempt({
+            workspaceId: task.workspaceId,
+            taskId: task.id,
+            modelPath,
+            phase,
+            iteration,
+            outcome: 'failed',
+            failureCode,
+            evidence,
+            previousCodeChecksum,
+          });
+          if (!isRepairableCadError(error)) throw error;
+          repairEvidenceText = evidence;
+          if (decideRepair(runAttempt, this.context.maxAutoIterations) === 'needs_user') {
+            await this.requestRepairInput(task.id, task.conversationId, phase, repairEvidenceText);
+            return;
+          }
+          if (phase !== TaskPhase.CODE) {
+            await this.move(task.id, task.conversationId, phase, TaskPhase.CODE);
+          }
+        }
+      }
+      if (!workflowSucceeded) throw new Error('CAD repair loop ended without a result');
+      await this.assertTaskActive(task.id);
       await this.move(task.id, task.conversationId, TaskPhase.VISUAL_REVIEW, TaskPhase.PUBLISH);
       await this.publishRevision({
         revisionId,
@@ -251,7 +388,7 @@ export class TaskWorker {
     return true;
   }
 
-  private async prepareModel(
+  private async prepareWorkingCopy(
     workspaceId: string,
     taskId: string,
     snapshot: ReturnType<typeof requirementSnapshotSchema.parse>,
@@ -286,14 +423,8 @@ export class TaskWorker {
         await cp(parentModelDirectory, modelDirectory, { recursive: true, force: false });
       }
     }
-    const length = snapshot.dimensions.length ?? 100;
-    const width = snapshot.dimensions.width ?? 50;
-    const thickness = snapshot.dimensions.thickness ?? 5;
-    // This deterministic baseline is replaced by the restricted model adapter once a provider is selected.
-    // Keeping generation here preserves the sole-entry and fixed-output contract in every environment.
-    const source = `from pathlib import Path\nfrom simplecadapi import GraphSession, export_model_json, export_step, export_stl, make_box_rsolid\n\nmodel_dir = Path(__file__).resolve().parent\nwith GraphSession() as session:\n    result = make_box_rsolid(${length}, ${width}, ${thickness})\npayload = export_model_json(session)\n(model_dir / "model.json").write_text(payload, encoding="utf-8")\nexport_step(result, str(model_dir / "model.step"))\nexport_stl(result, str(model_dir / "model.stl"))\nprint({"event": "grounding", "solid_count": 1, "volume": result.get_volume(), "faces": len(result.get_faces()), "edges": len(result.get_edges())})\n`;
+    await makeWorkingCopyWritable(modelDirectory);
     const modelPath = path.join(modelDirectory, 'model.py');
-    await writeFile(modelPath, source, { encoding: 'utf8', mode: 0o660 });
     return modelPath;
   }
 
@@ -313,7 +444,10 @@ export class TaskWorker {
       }),
       signal: AbortSignal.timeout(30_000),
     });
-    if (!response.ok) throw new Error('Strict model inspection failed');
+    if (!response.ok) {
+      if (response.status >= 500) throw new Error('Geometry inspection service is unavailable');
+      throw new RepairableCadError('STRICT_REPLAY_FAILED', 'Strict model inspection failed');
+    }
     const facts = (await response.json()) as {
       facts: {
         volume?: number;
@@ -371,8 +505,12 @@ export class TaskWorker {
         },
       ],
     };
-    if (!validation.passed)
-      throw new Error('Model geometry did not satisfy the requirement snapshot');
+    if (!validation.passed) {
+      throw new RepairableCadError(
+        'GEOMETRY_VALIDATION_FAILED',
+        'Model geometry did not satisfy the requirement snapshot',
+      );
+    }
     await writeFile(
       path.join(workspacePath, 'Model', 'validation.json'),
       JSON.stringify(validation, null, 2),
@@ -523,7 +661,13 @@ export class TaskWorker {
       }),
       signal: AbortSignal.timeout(180_000),
     });
-    if (!response.ok) throw new Error('Model preview and topology derivation failed');
+    if (!response.ok) {
+      if (response.status >= 500) throw new Error('Model derivation service is unavailable');
+      throw new RepairableCadError(
+        'VISUAL_DERIVATION_FAILED',
+        'Model preview and topology derivation failed',
+      );
+    }
     const result = (await response.json()) as {
       generated?: string[];
       face_count?: number;
@@ -550,11 +694,103 @@ export class TaskWorker {
       (result.edge_count ?? 0) <= 0 ||
       (result.triangle_count ?? 0) <= 0
     ) {
-      throw new Error('Derived artifact set is incomplete');
+      throw new RepairableCadError(
+        'DERIVED_ARTIFACTS_INCOMPLETE',
+        'Derived artifact set is incomplete',
+      );
     }
   }
 
+  private async assertTaskActive(taskId: string): Promise<void> {
+    const task = await this.context.prisma.task.findUniqueOrThrow({
+      where: { id: taskId },
+      select: { status: true, abortedAt: true },
+    });
+    if (
+      task.abortedAt !== null ||
+      task.status === TaskStatus.ABORTING ||
+      task.status === TaskStatus.ABORTED
+    ) {
+      throw new TaskAbortedError();
+    }
+  }
+
+  private async recordAttempt(input: {
+    workspaceId: string;
+    taskId: string;
+    modelPath: string;
+    phase: TaskPhase;
+    iteration: number;
+    outcome: 'passed' | 'failed';
+    failureCode: string | null;
+    evidence: string | null;
+    previousCodeChecksum: string | null;
+  }): Promise<string | null> {
+    const metadata = await writeAttemptHistory({
+      workspaceRoot: this.context.workspaceRoot,
+      ...input,
+    });
+    await this.context.prisma.auditLog.create({
+      data: {
+        action: 'task.repair.attempt',
+        resourceType: 'task',
+        resourceId: input.taskId,
+        traceId: input.taskId,
+        details: metadata,
+      },
+    });
+    return metadata.codeChecksum;
+  }
+
+  private async requestRepairInput(
+    taskId: string,
+    conversationId: string,
+    from: TaskPhase,
+    evidence: string,
+  ): Promise<void> {
+    await this.context.prisma.$transaction(async (tx) => {
+      await transitionTask(tx, { taskId, conversationId, from, to: TaskPhase.NEEDS_USER });
+      const message = await tx.message.create({
+        data: {
+          conversationId,
+          taskId,
+          role: 'AGENT',
+          content: `The model could not be repaired automatically. Please clarify the requirement or constraints. Last validation evidence: ${evidence}`,
+        },
+      });
+      await tx.conversation.update({
+        where: { id: conversationId },
+        data: { status: 'WAITING_USER' },
+      });
+      await publishDomainEvent(tx, {
+        conversationId,
+        taskId,
+        type: 'agent.message.completed',
+        data: { messageId: message.id },
+      });
+    });
+  }
+
   private async failTask(taskId: string, conversationId: string, error: unknown): Promise<void> {
+    if (error instanceof TaskAbortedError) {
+      await this.context.prisma.$transaction(async (tx) => {
+        await tx.task.update({
+          where: { id: taskId },
+          data: { status: TaskStatus.ABORTED, abortedAt: new Date() },
+        });
+        await publishDomainEvent(tx, {
+          conversationId,
+          taskId,
+          type: 'task.aborted',
+          data: { taskId },
+        });
+        await tx.conversation.update({
+          where: { id: conversationId },
+          data: { status: 'IDLE' },
+        });
+      });
+      return;
+    }
     const message = safeErrorMessage(error);
     await this.context.prisma.$transaction(async (tx) => {
       await tx.task.update({
@@ -579,6 +815,13 @@ export class TaskWorker {
   }
 }
 
+class TaskAbortedError extends Error {
+  public constructor() {
+    super('Task was aborted');
+    this.name = 'TaskAbortedError';
+  }
+}
+
 function userQuestion(missing: string[], conflicts: string[]): string {
   if (conflicts.length > 0) return 'Please confirm one unit system before modeling.';
   return `Please provide the missing CAD parameters: ${missing.join(', ')}.`;
@@ -586,6 +829,60 @@ function userQuestion(missing: string[], conflicts: string[]): string {
 
 function planSummary(snapshot: ReturnType<typeof requirementSnapshotSchema.parse>): string {
   return `Plan: create a ${snapshot.partType ?? 'CAD part'} in ${snapshot.unit}, validate dimensions and topology, render standard views, then publish canonical model artifacts.`;
+}
+
+function buildPlanPrompt(
+  conversationId: string,
+  taskId: string,
+  request: string,
+  snapshot: ReturnType<typeof requirementSnapshotSchema.parse>,
+): string {
+  return [
+    `CADIR conversation ID: ${conversationId}`,
+    `CADIR task ID: ${taskId}`,
+    `User CAD request: ${request}`,
+    `Requirement snapshot: ${JSON.stringify(snapshot)}`,
+    'Load the SimpleCADAPI Skill and relevant public docs, then provide a concise modeling and validation plan.',
+    'Plan mode is read-only. Do not write files or execute the model.',
+  ].join('\n');
+}
+
+function assistantText(parts: unknown[]): string | null {
+  const text = parts
+    .flatMap((part) => {
+      if (typeof part !== 'object' || part === null) return [];
+      const value = (part as { text?: unknown }).text;
+      return typeof value === 'string' ? [value] : [];
+    })
+    .join('')
+    .trim();
+  return text.length > 0 ? text.slice(0, 40_000) : null;
+}
+
+function buildModelPrompt(
+  conversationId: string,
+  taskId: string,
+  request: string,
+  snapshot: ReturnType<typeof requirementSnapshotSchema.parse>,
+  evidence: string | null,
+): string {
+  return [
+    `CADIR conversation ID: ${conversationId}`,
+    `CADIR task ID: ${taskId}`,
+    `User CAD request: ${request}`,
+    `Validated requirement snapshot: ${JSON.stringify(snapshot)}`,
+    ...(evidence === null
+      ? []
+      : [
+          `The previous attempt failed. Use this bounded validation evidence to repair the model: ${evidence}`,
+        ]),
+    'Load SKILL.md and the API index first, then every exact API and core type page you use.',
+    'Use only the CADIR tools. Write the complete implementation with write_model, execute it, inspect it, and repair failures.',
+    'The sole entry is Model/model.py. It must use GraphSession and export canonical model.json, STEP, and STL with fixed names.',
+    'Inside model.py set model_dir = Path(__file__).resolve().parent. Persist export_model_json(session) with (model_dir / "model.json").write_text(model_json, encoding="utf-8"). Call export_step(result, str(model_dir / "model.step")) and export_stl(result, str(model_dir / "model.stl")).',
+    'All three exports must be non-empty under Model/. Do not write model.json, model.step, or model.stl in the Working Copy root.',
+    'Do not stop after explaining or planning. Finish by executing and checking the model.',
+  ].join('\n');
 }
 
 function safeErrorMessage(error: unknown): string {

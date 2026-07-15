@@ -15,12 +15,17 @@ FROM base AS dependencies
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY packages/contracts/package.json packages/contracts/package.json
+COPY packages/opencode-cadir/package.json packages/opencode-cadir/package.json
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
 
 FROM dependencies AS build
 COPY apps/api apps/api
 COPY packages/contracts packages/contracts
-RUN pnpm --filter @cadir/contracts build && pnpm --filter @cadir/api db:generate && pnpm --filter @cadir/api build
+COPY packages/opencode-cadir packages/opencode-cadir
+RUN pnpm --filter @cadir/contracts build \
+    && pnpm --filter @cadir/opencode-adapter build \
+    && pnpm --filter @cadir/api db:generate \
+    && pnpm --filter @cadir/api build
 
 FROM node:22.17.1-bookworm-slim@sha256:2fa754a9ba4d7adbd2a51d182eaabbe355c82b673624035a38c0d42b08724854 AS runtime
 ENV NODE_ENV=production
@@ -36,6 +41,7 @@ COPY --from=build --chown=cadir:cadir /app/apps/api/dist ./dist
 COPY --from=build --chown=cadir:cadir /app/apps/api/prisma ./prisma
 COPY --from=build --chown=cadir:cadir /app/apps/api/package.json ./package.json
 COPY --from=build --chown=cadir:cadir /app/packages/contracts /app/packages/contracts
+COPY --from=build --chown=cadir:cadir /app/packages/opencode-cadir /app/packages/opencode-cadir
 USER 10001:10001
 EXPOSE 8080
 HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=5 CMD ["node", "-e", "fetch('http://127.0.0.1:8080/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]

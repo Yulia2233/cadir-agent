@@ -10,7 +10,7 @@ The release requires a customized OpenCode execution engine and a SimpleCADAPI S
 
 ## Decision
 
-Pin OpenCode to upstream tag `v1.4.9`, commit `803d9eb7ad5f4dfd832d7506a7cad83ded52253e`. Keep the upstream MIT license and copyright notices. Store the upstream source in a reproducible vendor package or source archive and keep all CADIR modifications in `packages/opencode-cadir`. Record `https://github.com/sst/opencode.git` as the upstream remote in vendor metadata. Synchronization happens on a dedicated `upstream-sync` branch, with upstream tests and CADIR adapter tests required before merge.
+Fork OpenCode at upstream tag `v1.4.9`, commit `803d9eb7ad5f4dfd832d7506a7cad83ded52253e`, into `https://github.com/Yulia2233/opencode.git`. Keep the upstream MIT license and copyright notices. Pin the fork as the `vendor/opencode` submodule and build the deployed OpenCode executable from that source; do not substitute a registry binary. Keep the CADIR integration plugin and adapter in `packages/opencode-cadir` so upstream source changes remain reviewable. Synchronization happens on a dedicated `upstream-sync` branch, with upstream tests and CADIR adapter tests required before merge.
 
 Pin SimpleCADAPI to release `2.0.1b1`, upstream commit `d727cb1ef1409433c8ef4be446e7117d323f9ade`. Produce CADIR's vendor artifact from that exact clean upstream revision and include its license, source checksum, SDK package, Skill, API index, exact API pages, and core type pages. Do not copy from the parent workspace's modified working tree.
 

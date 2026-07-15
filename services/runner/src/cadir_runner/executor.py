@@ -8,6 +8,9 @@ from cadir_runner.contracts import ExecutionResult
 from cadir_runner.security import CodePolicyError, resolve_workspace_model, validate_model_code
 
 
+REQUIRED_MODEL_ARTIFACTS = ("model.json", "model.step", "model.stl")
+
+
 async def execute_model(
     workspace_root: Path,
     workspace_path: str,
@@ -55,6 +58,26 @@ async def execute_model(
         os.killpg(process.pid, 9)
         stdout_bytes, stderr_bytes = await process.communicate()
         execution_status = "timed_out"
+
+    # A zero process exit code is not enough: downstream validation can only use
+    # canonical artifacts written inside Model/. Reject incomplete executions at
+    # this boundary so the repair loop receives immediate, actionable evidence.
+    if execution_status == "succeeded":
+        missing = [
+            name
+            for name in REQUIRED_MODEL_ARTIFACTS
+            if not (model_path.parent / name).is_file()
+            or (model_path.parent / name).stat().st_size == 0
+        ]
+        if missing:
+            execution_status = "failed"
+            detail = (
+                "Required canonical artifacts are missing or empty in Model/: "
+                + ", ".join(missing)
+                + ". Write export_model_json(session) to Model/model.json and export STEP/STL "
+                "to Model/model.step and Model/model.stl."
+            )
+            stderr_bytes = (stderr_bytes + b"\n" if stderr_bytes else b"") + detail.encode()
 
     truncated = len(stdout_bytes) > max_output_bytes or len(stderr_bytes) > max_output_bytes
     return ExecutionResult(

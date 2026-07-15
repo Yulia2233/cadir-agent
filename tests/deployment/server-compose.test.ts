@@ -37,4 +37,15 @@ describe('server deployment contract', () => {
     expect(script).toContain("assertMinimumVersion('Docker Compose', composeVersion, 2, 24)");
     expect(script).toContain('(envMode & 0o077) !== 0');
   });
+
+  it('keeps the API attached to both data and execution networks in production', async () => {
+    const production = await readFile(
+      new URL('../../infra/compose.production.yaml', import.meta.url),
+      'utf8',
+    );
+    const apiBlock = production.split('  web:')[0] ?? '';
+    expect(apiBlock).toContain('      - backend');
+    expect(apiBlock).toContain('      - runner-control');
+    expect(apiBlock).toContain('      - egress');
+  });
 });

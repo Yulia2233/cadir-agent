@@ -16,7 +16,23 @@ const configSchema = z.object({
   MODEL_CONFIG_KEK: z.string().min(43),
   CORS_ORIGINS: z.string().default('http://localhost:3000'),
   SESSION_TTL_SECONDS: z.coerce.number().int().min(300).default(43_200),
+  COOKIE_SECURE: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
+  BOOTSTRAP_ADMIN_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
   WORKSPACE_ROOT: z.string().default('/data/workspaces'),
+  OPENCODE_INTERNAL_URL: z.string().url().default('http://opencode:4096'),
+  OPENCODE_INTERNAL_USERNAME: z.string().min(1).default('opencode'),
+  OPENCODE_INTERNAL_PASSWORD: z.string().min(32),
+  OPENCODE_TOOL_TOKEN: z.string().min(32),
+  OPENCODE_VERSION: z.literal('1.4.9').default('1.4.9'),
+  OPENCODE_COMMIT: z
+    .literal('803d9eb7ad5f4dfd832d7506a7cad83ded52253e')
+    .default('803d9eb7ad5f4dfd832d7506a7cad83ded52253e'),
   RUNNER_INTERNAL_URL: z.string().url().default('http://runner:8091'),
   SIMPLECADAPI_VERSION: z.literal('2.0.1b1').default('2.0.1b1'),
   SIMPLECAD_SKILL_VERSION: z.literal('2.0.1b1').default('2.0.1b1'),
@@ -25,6 +41,7 @@ const configSchema = z.object({
     .default('true')
     .transform((value) => value === 'true'),
   TASK_WORKER_POLL_SECONDS: z.coerce.number().int().min(1).max(30).default(2),
+  TASK_MAX_AUTO_ITERATIONS: z.coerce.number().int().min(1).max(12).default(4),
 });
 
 export type AppConfig = z.infer<typeof configSchema>;
@@ -44,6 +61,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const runnerUrl = new URL(config.RUNNER_INTERNAL_URL);
   if (!['runner', '127.0.0.1', 'localhost'].includes(runnerUrl.hostname)) {
     throw new Error('RUNNER_INTERNAL_URL must target the internal Runner service');
+  }
+  const opencodeUrl = new URL(config.OPENCODE_INTERNAL_URL);
+  if (!['opencode', '127.0.0.1', 'localhost'].includes(opencodeUrl.hostname)) {
+    throw new Error('OPENCODE_INTERNAL_URL must target the internal OpenCode service');
   }
   return config;
 }

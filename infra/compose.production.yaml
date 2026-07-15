@@ -1,7 +1,24 @@
 services:
+  opencode:
+    ports: !reset []
+    networks:
+      - backend
+      - egress
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+          pids: 128
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
   api:
     environment:
       NODE_ENV: production
+      COOKIE_SECURE: 'true'
+      BOOTSTRAP_ADMIN_ENABLED: 'false'
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required in production}
     ports: !reset []
     deploy:
@@ -13,6 +30,7 @@ services:
           cpus: '0.25'
           memory: 256M
     networks:
+      - backend
       - runner-control
       - egress
 

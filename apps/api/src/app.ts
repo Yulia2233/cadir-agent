@@ -9,6 +9,8 @@ import { databasePlugin } from './plugins/database.js';
 import { errorHandlerPlugin } from './plugins/error-handler.js';
 import { objectStorePlugin } from './plugins/object-store.js';
 import { redisPlugin } from './plugins/redis.js';
+import { opencodePlugin } from './plugins/opencode.js';
+import { taskQueuePlugin } from './plugins/task-queue.js';
 import { authRoutes } from './routes/auth.js';
 import { artifactRoutes } from './routes/artifacts.js';
 import { conversationRoutes } from './routes/conversations.js';
@@ -20,6 +22,8 @@ import { uploadRoutes } from './routes/uploads.js';
 import { revisionRoutes } from './routes/revisions.js';
 import { modelCaseRoutes } from './routes/model-cases.js';
 import { caseCandidateRoutes } from './routes/case-candidates.js';
+import { opencodeInternalRoutes } from './routes/opencode-internal.js';
+import { adminQueueRoutes } from './routes/admin-queue.js';
 
 export async function buildApp(config: AppConfig = loadConfig()): Promise<FastifyInstance> {
   const app = Fastify({
@@ -54,7 +58,9 @@ export async function buildApp(config: AppConfig = loadConfig()): Promise<Fastif
   await app.register(rateLimit, { max: 300, timeWindow: '1 minute' });
   await app.register(databasePlugin);
   await app.register(redisPlugin);
+  await app.register(taskQueuePlugin);
   await app.register(objectStorePlugin);
+  await app.register(opencodePlugin);
   await app.register(authPlugin);
   await app.register(errorHandlerPlugin);
 
@@ -69,5 +75,7 @@ export async function buildApp(config: AppConfig = loadConfig()): Promise<Fastif
   await app.register(artifactRoutes);
   await app.register(modelCaseRoutes);
   await app.register(caseCandidateRoutes);
+  await app.register(adminQueueRoutes);
+  await app.register(opencodeInternalRoutes);
   return app;
 }

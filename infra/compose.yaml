@@ -111,10 +111,19 @@ services:
       CSRF_SECRET: ${CSRF_SECRET:?CSRF_SECRET is required}
       MODEL_CONFIG_KEK: ${MODEL_CONFIG_KEK:?MODEL_CONFIG_KEK is required}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      BOOTSTRAP_ADMIN_ENABLED: ${BOOTSTRAP_ADMIN_ENABLED:-false}
       WORKSPACE_ROOT: /data/workspaces
+      OPENCODE_INTERNAL_URL: http://opencode:4096
+      OPENCODE_INTERNAL_USERNAME: ${OPENCODE_INTERNAL_USERNAME:-opencode}
+      OPENCODE_INTERNAL_PASSWORD: ${OPENCODE_INTERNAL_PASSWORD:?OPENCODE_INTERNAL_PASSWORD is required}
+      OPENCODE_TOOL_TOKEN: ${OPENCODE_TOOL_TOKEN:?OPENCODE_TOOL_TOKEN is required}
+      OPENCODE_VERSION: 1.4.9
+      OPENCODE_COMMIT: 803d9eb7ad5f4dfd832d7506a7cad83ded52253e
       RUNNER_INTERNAL_URL: http://runner:8091
       SIMPLECADAPI_VERSION: 2.0.1b1
       SIMPLECAD_SKILL_VERSION: 2.0.1b1
+      TASK_MAX_AUTO_ITERATIONS: ${TASK_MAX_AUTO_ITERATIONS:-4}
     volumes:
       - workspace-data:/data/workspaces:rw
     ports:
@@ -130,10 +139,39 @@ services:
         condition: service_completed_successfully
       runner:
         condition: service_healthy
+      opencode:
+        condition: service_healthy
     networks:
       - backend
-      - runner-control
       - egress
+      - runner-control
+    stop_grace_period: 30s
+
+  opencode:
+    <<: *service-defaults
+    build:
+      context: ..
+      dockerfile: packages/opencode-cadir/Dockerfile
+    image: cadir-opencode:${CADIR_VERSION:-dev}
+    read_only: true
+    user: '10004:10004'
+    group_add:
+      - '10001'
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+      - /var/lib/opencode:rw,nosuid,uid=10004,gid=10004,mode=0700,size=512m
+    pids_limit: 128
+    mem_limit: 2g
+    cpus: 2.0
+    environment:
+      OPENCODE_SERVER_USERNAME: ${OPENCODE_INTERNAL_USERNAME:-opencode}
+      OPENCODE_SERVER_PASSWORD: ${OPENCODE_INTERNAL_PASSWORD:?OPENCODE_INTERNAL_PASSWORD is required}
+      CADIR_OPENCODE_TOOL_TOKEN: ${OPENCODE_TOOL_TOKEN:?OPENCODE_TOOL_TOKEN is required}
+      CADIR_API_INTERNAL_URL: http://api:8080
+    volumes:
+      - workspace-data:/data/workspaces:ro
+    networks:
+      - backend
     stop_grace_period: 30s
 
   runner:
@@ -180,6 +218,7 @@ services:
         condition: service_healthy
     networks:
       - backend
+      - egress
     stop_grace_period: 15s
 
   freecad-worker:

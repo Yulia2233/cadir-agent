@@ -8,6 +8,8 @@ const baseEnvironment = {
   SESSION_SECRET: '01234567890123456789012345678901',
   CSRF_SECRET: '01234567890123456789012345678901',
   MODEL_CONFIG_KEK: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+  OPENCODE_INTERNAL_PASSWORD: '01234567890123456789012345678901',
+  OPENCODE_TOOL_TOKEN: '01234567890123456789012345678901',
 };
 
 describe('server configuration', () => {
@@ -27,5 +29,22 @@ describe('server configuration', () => {
     expect(() =>
       loadConfig({ ...baseEnvironment, RUNNER_INTERNAL_URL: 'https://runner.example.com' }),
     ).toThrow(/internal Runner/);
+  });
+
+  it('rejects a public OpenCode endpoint', () => {
+    expect(() =>
+      loadConfig({ ...baseEnvironment, OPENCODE_INTERNAL_URL: 'https://opencode.example.com' }),
+    ).toThrow(/internal OpenCode/);
+  });
+
+  it('keeps one-time administrator setup and insecure cookies disabled by default', () => {
+    const config = loadConfig(baseEnvironment);
+    expect(config.BOOTSTRAP_ADMIN_ENABLED).toBe(false);
+    expect(config.COOKIE_SECURE).toBe(true);
+    expect(config.TASK_MAX_AUTO_ITERATIONS).toBe(4);
+  });
+
+  it('rejects an invalid automatic repair limit', () => {
+    expect(() => loadConfig({ ...baseEnvironment, TASK_MAX_AUTO_ITERATIONS: '0' })).toThrow();
   });
 });

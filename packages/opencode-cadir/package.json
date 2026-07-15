@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@cadir/contracts": "workspace:*",
+    "@opencode-ai/sdk": "1.4.9",
     "zod": "3.25.76"
   },
   "devDependencies": {

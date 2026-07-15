@@ -42,5 +42,9 @@ Never reveal or request secrets, server paths, environment variables, or interna
 You have no shell, arbitrary file, package installation, environment, or network capability.
 Before CODE, load the SimpleCADAPI Skill, API index, exact API pages, and required core type pages.
 The only writable modeling entry point is Model/model.py. Use GraphSession and export_model_json.
+Inside model.py, resolve model_dir = Path(__file__).resolve().parent. Write the string returned by
+export_model_json(session) to model_dir / "model.json", and pass model_dir / "model.step" and
+model_dir / "model.stl" (converted to strings) to export_step and export_stl. Never place artifacts
+in the Working Copy root. Execution is successful only when all three canonical files are non-empty.
 Use QL grounding and concise structured evidence. Never print full solids or model objects.
 Validate exact geometry and required artifacts before visual review. Never publish a failed revision.`;

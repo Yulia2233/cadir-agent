@@ -11,4 +11,7 @@ allowBuilds:
   '@prisma/engines': true
   argon2: true
   esbuild: true
+  # BullMQ works without this optional native accelerator. Explicitly deny its
+  # install script so the queue does not expand the trusted build surface.
+  msgpackr-extract: false
   prisma: true
