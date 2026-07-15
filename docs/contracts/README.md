@@ -12,6 +12,10 @@ Provider configuration routes include a server-side connection probe and a bound
 OpenAI-compatible model-list operation. Both use the encrypted user credential at
 the API boundary; the Web receives model IDs only and never receives the key.
 
+Session refresh uses `POST /api/auth/refresh` with the current CSRF token. A
+successful refresh rotates both session and CSRF tokens and revokes the replaced
+session in the same database transaction, so the previous token cannot be replayed.
+
 The canonical wire format uses camelCase for REST JSON and snake_case for the SSE
 envelope retained by the requirements (`event_id`, `conversation_id`, `task_id`).
 This exception is deliberate and must not be normalized independently by consumers.

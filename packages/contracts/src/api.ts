@@ -277,6 +277,7 @@ export const reviewCaseCandidateRequestSchema = z
 
 export const restApiSchema = {
   authLogin: { method: 'POST', path: '/api/auth/login' },
+  authRefresh: { method: 'POST', path: '/api/auth/refresh' },
   authLogout: { method: 'POST', path: '/api/auth/logout' },
   me: { method: 'GET', path: '/api/me' },
   modelConfigs: { method: 'GET', path: '/api/me/model-configs' },
