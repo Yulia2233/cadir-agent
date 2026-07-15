@@ -121,6 +121,7 @@ services:
       OPENCODE_VERSION: 1.4.9
       OPENCODE_COMMIT: 803d9eb7ad5f4dfd832d7506a7cad83ded52253e
       RUNNER_INTERNAL_URL: http://runner:8091
+      FREECAD_INTERNAL_URL: http://freecad-worker:8095
       SIMPLECADAPI_VERSION: 2.0.1b1
       SIMPLECAD_SKILL_VERSION: 2.0.1b1
       TASK_MAX_AUTO_ITERATIONS: ${TASK_MAX_AUTO_ITERATIONS:-4}
@@ -234,6 +235,14 @@ services:
     pids_limit: 64
     mem_limit: 4g
     cpus: 2.0
+    environment:
+      SIMPLECADAPI_VERSION: 2.0.1b1
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8095/health/ready', timeout=2)"]
+      interval: 15s
+      timeout: 3s
+      start_period: 30s
+      retries: 5
     networks:
       - runner-control
 

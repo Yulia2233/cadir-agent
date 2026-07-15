@@ -34,6 +34,7 @@ const configSchema = z.object({
     .literal('803d9eb7ad5f4dfd832d7506a7cad83ded52253e')
     .default('803d9eb7ad5f4dfd832d7506a7cad83ded52253e'),
   RUNNER_INTERNAL_URL: z.string().url().default('http://runner:8091'),
+  FREECAD_INTERNAL_URL: z.string().url().default('http://freecad-worker:8095'),
   SIMPLECADAPI_VERSION: z.literal('2.0.1b1').default('2.0.1b1'),
   SIMPLECAD_SKILL_VERSION: z.literal('2.0.1b1').default('2.0.1b1'),
   TASK_WORKER_ENABLED: z
@@ -61,6 +62,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const runnerUrl = new URL(config.RUNNER_INTERNAL_URL);
   if (!['runner', '127.0.0.1', 'localhost'].includes(runnerUrl.hostname)) {
     throw new Error('RUNNER_INTERNAL_URL must target the internal Runner service');
+  }
+  const freecadUrl = new URL(config.FREECAD_INTERNAL_URL);
+  if (!['freecad-worker', '127.0.0.1', 'localhost'].includes(freecadUrl.hostname)) {
+    throw new Error('FREECAD_INTERNAL_URL must target the internal FreeCAD service');
   }
   const opencodeUrl = new URL(config.OPENCODE_INTERNAL_URL);
   if (!['opencode', '127.0.0.1', 'localhost'].includes(opencodeUrl.hostname)) {
