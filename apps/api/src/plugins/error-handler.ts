@@ -20,6 +20,15 @@ export const errorHandlerPlugin = fp(async (app) => {
         traceId: request.id,
       });
     }
+    if ('statusCode' in error && typeof error.statusCode === 'number' && error.statusCode < 500) {
+      return reply.status(error.statusCode).send({
+        error: {
+          code: typeof error.code === 'string' ? error.code : 'BAD_REQUEST',
+          message: error.statusCode === 415 ? 'Unsupported request content type' : error.message,
+        },
+        traceId: request.id,
+      });
+    }
 
     request.log.error({ err: error }, 'Unhandled request error');
     return reply.status(500).send({

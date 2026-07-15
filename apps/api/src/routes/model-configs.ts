@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { decryptSecret, encryptSecret } from '../lib/crypto.js';
 import { notFound } from '../lib/errors.js';
 import { validateExternalBaseUrl } from '../lib/ssrf.js';
+import { AppError } from '../lib/errors.js';
+import { listProviderModels, probeProviderModel } from '../services/provider-probe.js';
 
 const configSchema = z.object({
   provider: z.string().trim().min(1).max(80),
@@ -161,20 +163,27 @@ export const modelConfigRoutes: FastifyPluginAsync = async (app) => {
 
     // Decryption remains inside the provider adapter boundary and is never logged.
     const apiKey = decryptSecret(config.encryptedApiKey, app.config.MODEL_CONFIG_KEK);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10_000);
-    try {
-      const response = await fetch(`${config.baseUrl.replace(/\/$/, '')}/models`, {
-        headers: { Authorization: `Bearer ${apiKey}` },
-        signal: controller.signal,
-      });
-      return response.ok
-        ? { status: 'succeeded' }
-        : { status: 'failed', reason: 'provider_rejected_request' };
-    } catch {
-      return { status: 'failed', reason: 'provider_unreachable' };
-    } finally {
-      clearTimeout(timeout);
+    return probeProviderModel({
+      baseUrl: config.baseUrl,
+      apiKey,
+      modelId: config.modelId,
+    });
+  });
+
+  app.get('/api/me/model-configs/:id/models', { preHandler: app.authenticate }, async (request) => {
+    const { id } = idSchema.parse(request.params);
+    const config = await app.prisma.userModelConfig.findFirst({
+      where: { id, userId: request.authUser.id },
+    });
+    if (config === null) throw notFound();
+    await validateExternalBaseUrl(config.baseUrl);
+    const result = await listProviderModels({
+      baseUrl: config.baseUrl,
+      apiKey: decryptSecret(config.encryptedApiKey, app.config.MODEL_CONFIG_KEK),
+    });
+    if (result.status === 'failed') {
+      throw new AppError(502, 'PROVIDER_MODELS_UNAVAILABLE', 'Provider model list is unavailable');
     }
+    return { items: result.models };
   });
 };
