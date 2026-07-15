@@ -21,6 +21,7 @@ const worker =
         redis: workerRedis,
         logger: app.log,
         runnerUrl: config.RUNNER_INTERNAL_URL,
+        freecadUrl: config.FREECAD_INTERNAL_URL,
         workspaceRoot: config.WORKSPACE_ROOT,
         skillVersion: config.SIMPLECAD_SKILL_VERSION,
         objectStore: app.objectStore,

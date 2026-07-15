@@ -26,6 +26,7 @@ type WorkerContext = {
   redis: Redis;
   logger: FastifyBaseLogger;
   runnerUrl: string;
+  freecadUrl: string;
   workspaceRoot: string;
   skillVersion: string;
   objectStore: ObjectStore;
@@ -295,6 +296,9 @@ export class TaskWorker {
         workspaceId: task.workspaceId,
         parentRevisionId: snapshot.parentRevisionId,
       });
+      if (snapshot.freecadRequested) {
+        await this.convertFreeCad(task.conversationId, task.id, revisionId, task.workspaceId);
+      }
       await this.move(task.id, task.conversationId, TaskPhase.PUBLISH, TaskPhase.CASE_PACKAGE);
       await this.move(
         task.id,
@@ -699,6 +703,103 @@ export class TaskWorker {
         'Derived artifact set is incomplete',
       );
     }
+  }
+
+  private async convertFreeCad(
+    conversationId: string,
+    taskId: string,
+    revisionId: string,
+    workspaceId: string,
+  ): Promise<void> {
+    await publishDomainEvent(this.context.prisma, {
+      conversationId,
+      taskId,
+      type: 'freecad.conversion.started',
+      data: { revisionId },
+    });
+    try {
+      const modelJson = await readFile(
+        path.join(
+          this.context.workspaceRoot,
+          workspaceId,
+          'revisions',
+          await this.revisionNumber(revisionId),
+          'Model',
+          'model.json',
+        ),
+        'utf8',
+      );
+      const response = await fetch(new URL('/internal/convert', this.context.freecadUrl), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model_json: modelJson, output: 'script' }),
+        signal: AbortSignal.timeout(120_000),
+      });
+      if (!response.ok) throw new Error('FreeCAD Worker is unavailable');
+      const converted = (await response.json()) as {
+        status: 'succeeded' | 'failed' | 'unsupported';
+        script?: string | null;
+        reason?: string | null;
+      };
+      if (converted.status !== 'succeeded' || !converted.script) {
+        await publishDomainEvent(this.context.prisma, {
+          conversationId,
+          taskId,
+          type: 'freecad.conversion.failed',
+          data: {
+            revisionId,
+            status: converted.status === 'unsupported' ? 'unsupported' : 'failed',
+            reason: (converted.reason ?? 'FreeCAD conversion failed').slice(0, 500),
+          },
+        });
+        return;
+      }
+      const filename = 'model.freecad.py';
+      const object = await this.context.objectStore.put(
+        `revisions/${conversationId}/${revisionId}/${filename}`,
+        Buffer.from(converted.script, 'utf8'),
+        'text/x-python',
+      );
+      const artifact = await this.context.prisma.artifact.create({
+        data: {
+          revisionId,
+          type: 'FREECAD_SCRIPT',
+          objectKey: object.key,
+          filename,
+          contentType: object.contentType,
+          size: BigInt(object.size),
+          checksum: object.checksum,
+          backend: 'freecad',
+        },
+      });
+      await publishDomainEvent(this.context.prisma, {
+        conversationId,
+        taskId,
+        type: 'freecad.conversion.completed',
+        data: { revisionId, artifactIds: [artifact.id] },
+      });
+      await publishDomainEvent(this.context.prisma, {
+        conversationId,
+        taskId,
+        type: 'artifact.available',
+        data: { artifactId: artifact.id, artifactType: 'FREECAD_SCRIPT' },
+      });
+    } catch (error: unknown) {
+      await publishDomainEvent(this.context.prisma, {
+        conversationId,
+        taskId,
+        type: 'freecad.conversion.failed',
+        data: { revisionId, status: 'failed', reason: safeErrorMessage(error) },
+      });
+    }
+  }
+
+  private async revisionNumber(revisionId: string): Promise<string> {
+    const revision = await this.context.prisma.modelRevision.findUniqueOrThrow({
+      where: { id: revisionId },
+      select: { revisionNumber: true },
+    });
+    return String(revision.revisionNumber);
   }
 
   private async assertTaskActive(taskId: string): Promise<void> {
