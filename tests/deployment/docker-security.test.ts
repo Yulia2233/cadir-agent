@@ -70,7 +70,9 @@ describe('API Docker image policy', () => {
       egress: null,
       'runner-control': null,
     });
+    expect(config.services.opencode?.networks).toEqual({ backend: null });
     expect(config.services.runner?.networks).toEqual({ 'runner-control': null });
+    expect(config.services.web?.networks).toEqual({ backend: null, edge: null });
   });
 
   it('keeps server services private and preserves the runner isolation boundary', async () => {

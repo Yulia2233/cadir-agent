@@ -42,7 +42,9 @@ The `check` action validates Linux `amd64`, Docker Engine 27+, Docker Compose 2.
 - Containers enable `no-new-privileges` and bounded JSON log rotation.
 - The Runner has a PID, memory, CPU, output, and wall-time limit. Its health check verifies the installed SimpleCADAPI version and required read-only Skill documents.
 - Docker socket and host paths are not mounted.
-- The backend and Runner control networks are internal.
+- The backend and Runner control networks are internal. Only the API joins the
+  egress network for SSRF-validated Provider calls; OpenCode, Web, and CAD
+  workers have no direct Internet route.
 
 The long-lived Runner service is a control-plane implementation stage. Final task execution must still create a disposable, network-disabled sandbox per task before isolation acceptance tests can be marked complete.
 

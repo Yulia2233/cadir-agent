@@ -219,7 +219,6 @@ services:
         condition: service_healthy
     networks:
       - backend
-      - egress
     stop_grace_period: 15s
 
   freecad-worker:
